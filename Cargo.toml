@@ -1,0 +1,29 @@
+[package]
+name = "cia"
+version = "0.2.0"
+edition = "2021"
+description = "A terminal dashboard for browsing Codex threads and switching tmux-managed agents"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/vivek-x-jha/cia"
+homepage = "https://github.com/vivek-x-jha/cia"
+keywords = ["codex", "tmux", "ratatui", "terminal", "tui"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shell-escape = "0.1"
+time = { version = "0.3", features = ["formatting", "local-offset"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.15"
+
+[profile.release]
+lto = true
+strip = true
