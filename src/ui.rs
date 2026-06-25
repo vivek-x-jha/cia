@@ -2,16 +2,22 @@ use std::{io, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
+    },
     Terminal,
 };
 
@@ -48,6 +54,7 @@ pub struct App {
     new_chat_mode: bool,
     new_chat_name: String,
     preview: Vec<Message>,
+    preview_scroll: u16,
     status: String,
     show_help: bool,
     pending_g: bool,
@@ -84,6 +91,7 @@ impl App {
             new_chat_mode: false,
             new_chat_name: String::new(),
             preview: Vec::new(),
+            preview_scroll: 0,
             status: String::new(),
             show_help: false,
             pending_g: false,
@@ -176,13 +184,16 @@ impl App {
 
     fn load_preview(&mut self) {
         self.preview.clear();
+        self.preview_scroll = 0;
         let row = self.current_rows().get(self.row_index).cloned();
         if let Some(Row::Thread { thread, .. }) = row {
             match self
                 .codex
                 .read_messages(&thread.id, self.config.codex.transcript_turns)
             {
-                Ok(messages) => self.preview = messages,
+                Ok(messages) => {
+                    self.preview = messages;
+                }
                 Err(error) => self.status = error.to_string(),
             }
         }
@@ -208,6 +219,16 @@ impl App {
             Focus::Preview => {}
         }
         self.load_preview();
+    }
+
+    fn scroll_preview(&mut self, delta: isize) {
+        self.preview_scroll = if delta.is_negative() {
+            self.preview_scroll
+                .saturating_add(delta.unsigned_abs() as u16)
+        } else {
+            self.preview_scroll.saturating_sub(delta as u16)
+        };
+        self.focus = Focus::Preview;
     }
 
     fn select_boundary(&mut self, last: bool) {
@@ -388,6 +409,12 @@ impl App {
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_next(-1)
             }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_preview(8)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_preview(-8)
+            }
             KeyCode::Char('n') => self.begin_new_thread(),
             KeyCode::Char('G') => self.select_boundary(true),
             KeyCode::Enter => self.activate(),
@@ -398,27 +425,41 @@ impl App {
             _ => {}
         }
     }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::ScrollDown => self.scroll_preview(3),
+            MouseEventKind::ScrollUp => self.scroll_preview(-3),
+            _ => {}
+        }
+    }
 }
 
 pub fn run(mut app: App) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let result = (|| -> Result<()> {
         while app.running {
             terminal.draw(|frame| draw(frame, &app))?;
             if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    app.handle_key(key);
+                match event::read()? {
+                    Event::Key(key) => app.handle_key(key),
+                    Event::Mouse(mouse) => app.handle_mouse(mouse),
+                    _ => {}
                 }
             }
         }
         Ok(())
     })();
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     result
 }
@@ -432,12 +473,11 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     );
     let outer = Layout::vertical([Constraint::Min(5), Constraint::Length(2)]).split(area);
     let panes = if area.width >= 100 {
-        Layout::horizontal([
-            Constraint::Percentage(22),
-            Constraint::Percentage(34),
-            Constraint::Percentage(44),
-        ])
-        .split(outer[0])
+        let rows = Layout::vertical([Constraint::Percentage(36), Constraint::Percentage(64)])
+            .split(outer[0]);
+        let top = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+            .split(rows[0]);
+        vec![top[0], top[1], rows[1]]
     } else {
         Layout::vertical([
             Constraint::Percentage(25),
@@ -445,6 +485,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             Constraint::Percentage(40),
         ])
         .split(outer[0])
+        .to_vec()
     };
     draw_projects(frame, panes[0], app, theme);
     draw_threads(frame, panes[1], app, theme);
@@ -534,6 +575,47 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
 }
 
 fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
+    let title = " Preview ";
+    let block = panel(title, app.focus == Focus::Preview, theme);
+    let viewport_height = area
+        .inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        })
+        .height as usize;
+    let text = preview_text(app, theme);
+    let content_height = text.lines.len();
+    let max_scroll = content_height.saturating_sub(viewport_height);
+    let scroll = max_scroll.saturating_sub(app.preview_scroll as usize);
+    frame.render_widget(
+        Paragraph::new(text)
+            .block(block)
+            .scroll((scroll as u16, 0))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+    if max_scroll > 0 {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(None)
+            .thumb_symbol("│")
+            .thumb_style(Style::default().fg(theme.muted));
+        let mut state = ScrollbarState::new(content_height)
+            .position(scroll)
+            .viewport_content_length(viewport_height);
+        frame.render_stateful_widget(
+            scrollbar,
+            area.inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            &mut state,
+        );
+    }
+}
+
+fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
     let rows = app.current_rows();
     let mut text = Text::default();
     if let Some(row) = rows.get(app.row_index) {
@@ -554,7 +636,7 @@ fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
             }
             Row::Thread { thread, live } => {
                 text.push_line(Line::styled(
-                    thread.title(),
+                    thread.title().to_string(),
                     Style::default()
                         .fg(theme.accent)
                         .add_modifier(Modifier::BOLD),
@@ -580,9 +662,9 @@ fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
                 text.push_line("");
                 if app.preview.is_empty() {
                     text.push_line(if thread.preview.is_empty() {
-                        "No transcript preview available."
+                        "No transcript preview available.".to_string()
                     } else {
-                        &thread.preview
+                        thread.preview.clone()
                     });
                 } else {
                     for message in &app.preview {
@@ -603,18 +685,13 @@ fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
             }
         }
     }
-    frame.render_widget(
-        Paragraph::new(text)
-            .block(panel(" Preview ", app.focus == Focus::Preview, theme))
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    text
 }
 
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     let popup = centered(area, 64, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
+    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))

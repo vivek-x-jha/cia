@@ -103,6 +103,7 @@ Reload tmux, then open CIA with `prefix + g`.
 | `Tab`, `Shift-Tab`, `h`, `l` | Move focus between projects, chats, and preview |
 | `j`, `Ctrl+n`, `↓` | Move selection down |
 | `k`, `Ctrl+p`, `↑` | Move selection up |
+| `Ctrl+d`, `Ctrl+u` | Scroll the preview down or up |
 | `gg`, `G` | Jump to the first or last selection |
 | `Enter` | Switch to a live chat or resume a saved thread |
 | `n` | Name and start a new Codex chat in the selected project |
