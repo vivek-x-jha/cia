@@ -39,6 +39,7 @@ enum Focus {
 pub struct App {
     config: Config,
     cia_command: String,
+    username: String,
     codex: CodexClient,
     tmux: TmuxClient,
     state: State,
@@ -72,10 +73,14 @@ impl App {
             .context("failed to locate the CIA executable")?
             .to_string_lossy()
             .into_owned();
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "You".into());
         let show_archived = config.ui.archived_default;
         let mut app = Self {
             config,
             cia_command,
+            username,
             codex,
             tmux,
             state,
@@ -668,14 +673,16 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     });
                 } else {
                     for message in &app.preview {
+                        let is_user = message.role == "You";
+                        let role = if is_user {
+                            app.username.as_str()
+                        } else {
+                            &message.role
+                        };
                         text.push_line(Line::styled(
-                            message.role.to_string(),
+                            role.to_string(),
                             Style::default()
-                                .fg(if message.role == "You" {
-                                    theme.selected_text
-                                } else {
-                                    theme.accent
-                                })
+                                .fg(if is_user { theme.blue } else { theme.accent })
                                 .add_modifier(Modifier::BOLD),
                         ));
                         text.push_line(message.text.clone());
@@ -718,8 +725,8 @@ struct ResolvedTheme {
     foreground: Color,
     muted: Color,
     accent: Color,
+    blue: Color,
     selected: Color,
-    selected_text: Color,
     success: Color,
     warning: Color,
 }
@@ -732,8 +739,8 @@ impl From<&ThemeConfig> for ResolvedTheme {
             foreground: color(&value.foreground),
             muted: color(&value.muted),
             accent: color(&value.accent),
+            blue: Color::Blue,
             selected: color(&value.selected),
-            selected_text: color(&value.foreground),
             success: color(&value.success),
             warning: color(&value.warning),
         }
