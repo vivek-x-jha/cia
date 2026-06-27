@@ -231,7 +231,7 @@ status_archive = "#e06c75"
 status_help = "#e5c07b"
 preview_user = "#0000ff"
 preview_codex = "#00ffff"
-preview_pi = "#eccef0"
+preview_pi = "#00ffff"
 ```
 
 Unknown keys are rejected so misspellings and stale configuration fail loudly.

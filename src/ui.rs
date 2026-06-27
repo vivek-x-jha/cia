@@ -812,6 +812,10 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                         let is_user = message.role == "You";
                         let role = if is_user {
                             app.username.as_str()
+                        } else if thread.harness_id == PI_HARNESS_ID {
+                            harness
+                                .map(|harness| harness.marker.as_str())
+                                .unwrap_or("π")
                         } else {
                             &message.role
                         };

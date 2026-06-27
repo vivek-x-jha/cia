@@ -118,7 +118,7 @@ impl Default for ThemeConfig {
             status_help: "#e5c07b".into(),
             preview_user: "#0000ff".into(),
             preview_codex: "#00ffff".into(),
-            preview_pi: "#eccef0".into(),
+            preview_pi: "#00ffff".into(),
         }
     }
 }
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(cfg.theme.status_open, "#112233");
         assert_eq!(cfg.theme.status_projects, "#e6e6e6");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
-        assert_eq!(cfg.theme.preview_pi, "#eccef0");
+        assert_eq!(cfg.theme.preview_pi, "#00ffff");
     }
 
     #[test]
