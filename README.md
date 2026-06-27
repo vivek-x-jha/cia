@@ -14,11 +14,10 @@
 
 </div>
 
-CIA is a fast terminal dashboard for people who run multiple
-[Codex CLI](https://developers.openai.com/codex/cli/) conversations across tmux
-projects. It combines Codex's saved thread history with the agents currently
-running in tmux, then gives you one place to search, preview, start, resume, and
-switch between them.
+CIA is a fast terminal dashboard for people who run multiple coding-agent
+conversations across tmux projects. Today its saved-history adapter is Codex,
+and its tmux integration can also recognize other live agent commands when they
+are listed in configuration.
 
 It does not replace Codex or tmux. It connects them.
 
@@ -36,8 +35,10 @@ It does not replace Codex or tmux. It connects them.
 - **One `agents` window per project**, with each managed chat in its own pane.
 - **tmux-resurrect support** that preserves the command needed to reopen a
   specific thread.
-- **Read-only Codex integration** through `codex app-server`; CIA never edits
-  Codex databases or rollout files.
+- **Harness-aware tmux metadata** so panes are tagged by agent harness and
+  saved thread id.
+- **Read-only Codex history integration** through `codex app-server`; CIA never
+  edits Codex databases or rollout files.
 - **Small, inspectable state** containing only CIA's pane-to-thread mappings and
   last selected project.
 
@@ -193,6 +194,7 @@ transcript_turns = 3
 
 [tmux]
 command = "tmux"
+agent_commands = ["codex"]
 agent_window_names = ["agents"]
 new_window_prefix = "agent:"
 
@@ -231,6 +233,7 @@ care about; unset theme keys continue using the defaults above.
 | `codex.command` | Codex executable or wrapper used for app-server and chats |
 | `codex.transcript_turns` | Number of recent turns included in the preview |
 | `tmux.command` | tmux executable or wrapper |
+| `tmux.agent_commands` | Process names treated as live agent panes, for example `["codex", "claude", "opencode", "pi"]` |
 | `tmux.agent_window_names` | Candidate managed-window names; the first name is used for new and resumed chats |
 | `tmux.new_window_prefix` | Legacy managed-window prefix retained for compatibility |
 | `ui.archived_default` | Show archived threads when CIA starts |
@@ -250,7 +253,8 @@ $XDG_STATE_HOME/cia/state.json
 
 Without `XDG_STATE_HOME`, this becomes `~/.local/state/cia/state.json`.
 
-The file contains the last selected project and CIA's tmux pane mappings. CIA
+The file contains the last selected project and CIA's tmux pane mappings. Each
+mapping records a harness id plus the harness-native thread id. CIA
 does **not** modify Codex's SQLite databases, rollout JSONL files, archived
 threads, or authentication state. Thread creation, naming, and resume behavior
 remain owned by the Codex CLI.
@@ -261,7 +265,8 @@ The codebase is intentionally small and split by responsibility:
 
 | Module | Responsibility |
 | --- | --- |
-| `codex` | JSONL app-server client, thread listing, and transcript extraction |
+| `agent` | Shared harness-neutral thread/message model and client boundary |
+| `codex` | Codex JSONL app-server adapter, thread listing, and transcript extraction |
 | `tmux` | Pane inventory, agent detection, launch, switching, and metadata |
 | `model` | Project grouping and saved-thread/live-pane reconciliation |
 | `state` | Durable CIA-only mapping state |

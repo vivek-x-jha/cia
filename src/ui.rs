@@ -22,11 +22,11 @@ use ratatui::{
 };
 
 use crate::{
-    codex::{Client as CodexClient, Message, Thread},
+    agent::{Harness, Message, Thread},
     config::{state_path, Config, ThemeConfig},
     model::{build_projects, rows, Project, Row},
     state::State,
-    tmux::{Client as TmuxClient, Window},
+    tmux::{AgentLaunch, Client as TmuxClient, Window},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub struct App {
     config: Config,
     cia_command: String,
     username: String,
-    codex: CodexClient,
+    harness: Harness,
     tmux: TmuxClient,
     state: State,
     state_path: PathBuf,
@@ -67,7 +67,7 @@ impl App {
         let state_path = state_path();
         let state = State::load(&state_path)
             .with_context(|| format!("failed to load {}", state_path.display()))?;
-        let codex = CodexClient::start(&config.codex.command)?;
+        let harness = Harness::start(&config)?;
         let tmux = TmuxClient::new(config.tmux.clone());
         let cia_command = std::env::current_exe()
             .context("failed to locate the CIA executable")?
@@ -81,7 +81,7 @@ impl App {
             config,
             cia_command,
             username,
-            codex,
+            harness,
             tmux,
             state,
             state_path,
@@ -120,7 +120,7 @@ impl App {
     }
 
     fn refresh(&mut self) -> Result<()> {
-        let threads = self.codex.list_threads(self.show_archived)?;
+        let threads = self.harness.list_threads(self.show_archived)?;
         let mut windows = self.tmux.inventory()?;
         self.state.reconcile(&mut windows);
         self.all_windows = windows.clone();
@@ -193,7 +193,7 @@ impl App {
         let row = self.current_rows().get(self.row_index).cloned();
         if let Some(Row::Thread { thread, .. }) = row {
             match self
-                .codex
+                .harness
                 .read_messages(&thread.id, self.config.codex.transcript_turns)
             {
                 Ok(messages) => {
@@ -277,15 +277,16 @@ impl App {
     }
 
     fn open_thread(&mut self, thread: &Thread) -> Result<()> {
-        let window = self.tmux.open_thread(
-            &self.all_windows,
-            &thread.cwd,
-            thread.title(),
-            &thread.id,
-            &self.cia_command,
-            &self.config.codex.command,
-        )?;
-        self.state.record(&thread.id, &window);
+        let window = self.tmux.open_agent(AgentLaunch {
+            inventory: &self.all_windows,
+            cwd: &thread.cwd,
+            title: thread.title(),
+            harness_id: &self.harness.id,
+            thread_id: Some(&thread.id),
+            cia_command: &self.cia_command,
+            agent_command: &self.harness.command,
+        })?;
+        self.state.record(&self.harness.id, &thread.id, &window);
         self.state.last_project = Some(thread.cwd.clone());
         self.state.save(&self.state_path)?;
         self.tmux.switch_to(&window)
@@ -315,13 +316,15 @@ impl App {
         }
         let result = self
             .tmux
-            .open_new_thread(
-                &self.all_windows,
-                &project.cwd,
+            .open_agent(AgentLaunch {
+                inventory: &self.all_windows,
+                cwd: &project.cwd,
                 title,
-                &self.cia_command,
-                &self.config.codex.command,
-            )
+                harness_id: &self.harness.id,
+                thread_id: None,
+                cia_command: &self.cia_command,
+                agent_command: &self.harness.command,
+            })
             .and_then(|window| {
                 self.state.last_project = Some(project.cwd.clone());
                 self.state.save(&self.state_path)?;
@@ -677,7 +680,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     window.session, window.window_name, window.cwd
                 ));
                 text.push_line("");
-                text.push_line("CIA will switch to this window without guessing which Codex thread it contains.");
+                text.push_line("CIA will switch to this window without guessing which saved thread it contains.");
             }
             Row::Thread { thread, live } => {
                 text.push_line(Line::styled(
@@ -693,7 +696,8 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     .unwrap_or("no branch");
                 text.push_line(Line::styled(
                     format!(
-                        "{} · {} · created {} · {}",
+                        "{} · {} · {} · created {} · {}",
+                        app.harness.label,
                         thread.source_label(),
                         branch,
                         format_timestamp(thread.created_at),

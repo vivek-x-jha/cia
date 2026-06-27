@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    codex::Thread,
+    agent::Thread,
     tmux::{normalized_path, Client as TmuxClient, Window},
 };
 
@@ -183,6 +183,7 @@ mod tests {
             pane_pid: 1,
             command: "codex".into(),
             cwd: "/tmp/repo".into(),
+            harness_id: None,
             thread_id: None,
             chat_title: None,
         };
@@ -204,6 +205,7 @@ mod tests {
             pane_pid: 1,
             command: "cia".into(),
             cwd: "/tmp/repo".into(),
+            harness_id: Some(crate::agent::DEFAULT_HARNESS_ID.into()),
             thread_id: None,
             chat_title: Some("chat".into()),
         };

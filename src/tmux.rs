@@ -24,8 +24,19 @@ pub struct Window {
     pub pane_pid: u32,
     pub command: String,
     pub cwd: String,
+    pub harness_id: Option<String>,
     pub thread_id: Option<String>,
     pub chat_title: Option<String>,
+}
+
+pub struct AgentLaunch<'a> {
+    pub inventory: &'a [Window],
+    pub cwd: &'a str,
+    pub title: &'a str,
+    pub harness_id: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub cia_command: &'a str,
+    pub agent_command: &'a str,
 }
 
 pub struct Client {
@@ -39,7 +50,7 @@ impl Client {
 
     pub fn inventory(&self) -> Result<Vec<Window>> {
         let format = format!(
-            "#{{session_name}}{SEP}#{{session_last_attached}}{SEP}#{{window_id}}{SEP}#{{window_name}}{SEP}#{{pane_id}}{SEP}#{{pane_pid}}{SEP}#{{pane_current_command}}{SEP}#{{pane_current_path}}{SEP}#{{@cia_thread_id}}{SEP}#{{@cia_chat_title}}"
+            "#{{session_name}}{SEP}#{{session_last_attached}}{SEP}#{{window_id}}{SEP}#{{window_name}}{SEP}#{{pane_id}}{SEP}#{{pane_pid}}{SEP}#{{pane_current_command}}{SEP}#{{pane_current_path}}{SEP}#{{@cia_harness}}{SEP}#{{@cia_thread_id}}{SEP}#{{@cia_chat_title}}"
         );
         let output = Command::new(&self.config.command)
             .args(["list-panes", "-a", "-F", &format])
@@ -59,7 +70,11 @@ impl Client {
     }
 
     pub fn is_agent(&self, window: &Window) -> bool {
-        window.command == "codex"
+        self.config
+            .agent_commands
+            .iter()
+            .any(|command| command == &window.command)
+            || window.harness_id.is_some()
             || window.thread_id.is_some()
             || window.chat_title.is_some()
             || window
@@ -67,42 +82,29 @@ impl Client {
                 .starts_with(&self.config.new_window_prefix)
     }
 
-    pub fn open_thread(
-        &self,
-        inventory: &[Window],
-        cwd: &str,
-        title: &str,
-        thread_id: &str,
-        cia_command: &str,
-        codex_command: &str,
-    ) -> Result<Window> {
-        let command = format!(
-            "{} run-thread --thread-id {} --cwd-hex {} --title-hex {} --codex-command-hex {}",
-            shell(cia_command),
-            shell(thread_id),
-            crate::runner::encode(cwd),
-            crate::runner::encode(title),
-            crate::runner::encode(codex_command)
+    pub fn open_agent(&self, launch: AgentLaunch<'_>) -> Result<Window> {
+        let mut command = format!(
+            "{} run-thread --harness-id {}",
+            shell(launch.cia_command),
+            shell(launch.harness_id)
         );
-        self.open_agent_pane(inventory, cwd, title, Some(thread_id), &command)
-    }
-
-    pub fn open_new_thread(
-        &self,
-        inventory: &[Window],
-        cwd: &str,
-        title: &str,
-        cia_command: &str,
-        codex_command: &str,
-    ) -> Result<Window> {
-        let command = format!(
-            "{} run-thread --cwd-hex {} --title-hex {} --codex-command-hex {}",
-            shell(cia_command),
-            crate::runner::encode(cwd),
-            crate::runner::encode(title),
-            crate::runner::encode(codex_command)
-        );
-        self.open_agent_pane(inventory, cwd, title, None, &command)
+        if let Some(thread_id) = launch.thread_id {
+            command.push_str(&format!(" --thread-id {}", shell(thread_id)));
+        }
+        command.push_str(&format!(
+            " --cwd-hex {} --title-hex {} --agent-command-hex {}",
+            crate::runner::encode(launch.cwd),
+            crate::runner::encode(launch.title),
+            crate::runner::encode(launch.agent_command)
+        ));
+        self.open_agent_pane(
+            launch.inventory,
+            launch.cwd,
+            launch.title,
+            launch.harness_id,
+            launch.thread_id,
+            &command,
+        )
     }
 
     fn open_agent_pane(
@@ -110,6 +112,7 @@ impl Client {
         inventory: &[Window],
         cwd: &str,
         title: &str,
+        harness_id: &str,
         thread_id: Option<&str>,
         command: &str,
     ) -> Result<Window> {
@@ -181,9 +184,9 @@ impl Client {
         };
 
         if let Some(thread_id) = thread_id {
-            self.mark_pane(&pane_id, thread_id, title)?;
+            self.mark_pane(&pane_id, harness_id, thread_id, title)?;
         } else {
-            self.mark_title(&pane_id, title)?;
+            self.mark_title(&pane_id, harness_id, title)?;
         }
         self.run(&["send-keys", "-t", &pane_id, "-l", command])?;
         self.run(&["send-keys", "-t", &pane_id, "Enter"])?;
@@ -194,7 +197,21 @@ impl Client {
             .context("tmux created the agent pane but it was not discoverable")
     }
 
-    pub fn mark_pane(&self, pane_id: &str, thread_id: &str, title: &str) -> Result<()> {
+    pub fn mark_pane(
+        &self,
+        pane_id: &str,
+        harness_id: &str,
+        thread_id: &str,
+        title: &str,
+    ) -> Result<()> {
+        self.run(&[
+            "set-option",
+            "-p",
+            "-t",
+            pane_id,
+            "@cia_harness",
+            harness_id,
+        ])?;
         self.run(&[
             "set-option",
             "-p",
@@ -203,15 +220,23 @@ impl Client {
             "@cia_thread_id",
             thread_id,
         ])?;
-        self.mark_title(pane_id, title)
+        self.mark_title(pane_id, harness_id, title)
     }
 
-    pub fn mark_title(&self, pane_id: &str, title: &str) -> Result<()> {
+    pub fn mark_title(&self, pane_id: &str, harness_id: &str, title: &str) -> Result<()> {
+        self.run(&[
+            "set-option",
+            "-p",
+            "-t",
+            pane_id,
+            "@cia_harness",
+            harness_id,
+        ])?;
         self.run(&["set-option", "-p", "-t", pane_id, "@cia_chat_title", title])?;
         self.run(&["select-pane", "-t", pane_id, "-T", title])
     }
 
-    pub fn rename_active_codex_thread(&self, pane_id: &str, title: &str) -> Result<()> {
+    pub fn rename_active_agent_thread(&self, pane_id: &str, title: &str) -> Result<()> {
         thread::sleep(Duration::from_millis(1_000));
         self.run(&["send-keys", "-t", pane_id, "-l", "/rename"])?;
         self.run(&["send-keys", "-t", pane_id, "Enter"])?;
@@ -268,7 +293,7 @@ impl Client {
 
 fn parse_window(line: &str) -> Result<Window> {
     let fields: Vec<&str> = line.split(SEP).collect();
-    if fields.len() != 10 {
+    if fields.len() != 11 {
         return Err(anyhow!(
             "unexpected tmux inventory row with {} fields",
             fields.len()
@@ -283,8 +308,9 @@ fn parse_window(line: &str) -> Result<Window> {
         pane_pid: fields[5].parse().unwrap_or_default(),
         command: fields[6].into(),
         cwd: fields[7].into(),
-        thread_id: (!fields[8].is_empty()).then(|| fields[8].into()),
-        chat_title: (!fields[9].is_empty()).then(|| fields[9].into()),
+        harness_id: (!fields[8].is_empty()).then(|| fields[8].into()),
+        thread_id: (!fields[9].is_empty()).then(|| fields[9].into()),
+        chat_title: (!fields[10].is_empty()).then(|| fields[10].into()),
     })
 }
 
@@ -341,13 +367,15 @@ fn shell(value: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::DEFAULT_HARNESS_ID;
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn parses_structured_tmux_rows() {
-        let line = "dotfiles\u{1f}100\u{1f}@2\u{1f}agents\u{1f}%2\u{1f}42\u{1f}codex\u{1f}/tmp/project\u{1f}thread-1\u{1f}Test chat";
+        let line = "dotfiles\u{1f}100\u{1f}@2\u{1f}agents\u{1f}%2\u{1f}42\u{1f}codex\u{1f}/tmp/project\u{1f}codex\u{1f}thread-1\u{1f}Test chat";
         let window = parse_window(line).unwrap();
         assert_eq!(window.session, "dotfiles");
+        assert_eq!(window.harness_id.as_deref(), Some(DEFAULT_HARNESS_ID));
         assert_eq!(window.thread_id.as_deref(), Some("thread-1"));
         assert_eq!(window.chat_title.as_deref(), Some("Test chat"));
     }
@@ -371,6 +399,7 @@ mod tests {
             pane_pid: 1,
             command: "zsh".into(),
             cwd: "/repo".into(),
+            harness_id: None,
             thread_id: None,
             chat_title: None,
         };
@@ -425,14 +454,15 @@ mod tests {
         });
         let inventory = client.inventory().unwrap();
         let window = client
-            .open_thread(
-                &inventory,
-                "/tmp",
-                "Test chat",
-                "thread-1",
-                fake_cia.to_str().unwrap(),
-                fake_codex.to_str().unwrap(),
-            )
+            .open_agent(AgentLaunch {
+                inventory: &inventory,
+                cwd: "/tmp",
+                title: "Test chat",
+                harness_id: DEFAULT_HARNESS_ID,
+                thread_id: Some("thread-1"),
+                cia_command: fake_cia.to_str().unwrap(),
+                agent_command: fake_codex.to_str().unwrap(),
+            })
             .unwrap();
         assert_eq!(window.thread_id.as_deref(), Some("thread-1"));
         assert_eq!(window.window_name, "agents");
@@ -467,27 +497,32 @@ mod tests {
         assert!(child_commands
             .iter()
             .any(|command| command.contains("thread-1")));
+        let second_inventory = client.inventory().unwrap();
         let second = client
-            .open_thread(
-                &client.inventory().unwrap(),
-                "/tmp",
-                "Other chat",
-                "thread-2",
-                fake_cia.to_str().unwrap(),
-                fake_codex.to_str().unwrap(),
-            )
+            .open_agent(AgentLaunch {
+                inventory: &second_inventory,
+                cwd: "/tmp",
+                title: "Other chat",
+                harness_id: DEFAULT_HARNESS_ID,
+                thread_id: Some("thread-2"),
+                cia_command: fake_cia.to_str().unwrap(),
+                agent_command: fake_codex.to_str().unwrap(),
+            })
             .unwrap();
         assert_eq!(second.window_id, window.window_id);
         assert_ne!(second.pane_id, window.pane_id);
         assert_eq!(second.chat_title.as_deref(), Some("Other chat"));
+        let new_chat_inventory = client.inventory().unwrap();
         let new_chat = client
-            .open_new_thread(
-                &client.inventory().unwrap(),
-                "/tmp",
-                "Named chat",
-                fake_cia.to_str().unwrap(),
-                fake_codex.to_str().unwrap(),
-            )
+            .open_agent(AgentLaunch {
+                inventory: &new_chat_inventory,
+                cwd: "/tmp",
+                title: "Named chat",
+                harness_id: DEFAULT_HARNESS_ID,
+                thread_id: None,
+                cia_command: fake_cia.to_str().unwrap(),
+                agent_command: fake_codex.to_str().unwrap(),
+            })
             .unwrap();
         assert_eq!(new_chat.window_id, window.window_id);
         assert_eq!(new_chat.thread_id, None);

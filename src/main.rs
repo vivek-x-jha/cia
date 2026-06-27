@@ -1,3 +1,4 @@
+mod agent;
 mod codex;
 mod config;
 mod model;
@@ -33,7 +34,7 @@ enum Commands {
         archived: bool,
     },
 
-    /// Resume a Codex thread while preserving tmux metadata
+    /// Resume an agent thread while preserving tmux metadata
     #[command(hide = true)]
     RunThread {
         #[arg(long)]
@@ -43,7 +44,11 @@ enum Commands {
         #[arg(long)]
         title_hex: String,
         #[arg(long)]
-        codex_command_hex: String,
+        harness_id: Option<String>,
+        #[arg(long)]
+        agent_command_hex: Option<String>,
+        #[arg(long)]
+        codex_command_hex: Option<String>,
     },
 }
 
@@ -58,17 +63,23 @@ fn main() -> Result<()> {
             thread_id,
             cwd_hex,
             title_hex,
+            harness_id,
+            agent_command_hex,
             codex_command_hex,
         }) => {
             let cwd = PathBuf::from(runner::decode(&cwd_hex, "working directory")?);
             let title = runner::decode(&title_hex, "chat title")?;
-            let codex_command = runner::decode(&codex_command_hex, "Codex command")?;
+            let command_hex = agent_command_hex
+                .or(codex_command_hex)
+                .context("missing agent command")?;
+            let agent_command = runner::decode(&command_hex, "agent command")?;
             return run_thread(
                 &config.tmux,
+                harness_id.as_deref().unwrap_or(agent::DEFAULT_HARNESS_ID),
                 thread_id.as_deref(),
                 &cwd,
                 &title,
-                &codex_command,
+                &agent_command,
             );
         }
         None => {}
@@ -90,8 +101,8 @@ fn open_thread_by_query(
     let project = tmux::normalized_path(project)
         .to_string_lossy()
         .into_owned();
-    let mut codex = codex::Client::start(&config.codex.command)?;
-    let project_threads: Vec<_> = codex
+    let mut harness = agent::Harness::start(config)?;
+    let project_threads: Vec<_> = harness
         .list_threads(archived)?
         .into_iter()
         .filter(|thread| tmux::normalized_path(&thread.cwd).to_string_lossy() == project)
@@ -114,10 +125,10 @@ fn open_thread_by_query(
     let mut state = state::State::load(&config::state_path())?;
     let mut windows = tmux.inventory()?;
     state.reconcile(&mut windows);
-    if let Some(window) = windows
-        .iter()
-        .find(|window| window.thread_id.as_deref() == Some(thread.id.as_str()))
-    {
+    if let Some(window) = windows.iter().find(|window| {
+        window.harness_id.as_deref() == Some(harness.id.as_str())
+            && window.thread_id.as_deref() == Some(thread.id.as_str())
+    }) {
         return tmux.switch_to(window);
     }
 
@@ -125,21 +136,22 @@ fn open_thread_by_query(
         .context("failed to locate the CIA executable")?
         .to_string_lossy()
         .into_owned();
-    let window = tmux.open_thread(
-        &windows,
-        &thread.cwd,
-        thread.title(),
-        &thread.id,
-        &cia_command,
-        &config.codex.command,
-    )?;
-    state.record(&thread.id, &window);
+    let window = tmux.open_agent(tmux::AgentLaunch {
+        inventory: &windows,
+        cwd: &thread.cwd,
+        title: thread.title(),
+        harness_id: &harness.id,
+        thread_id: Some(&thread.id),
+        cia_command: &cia_command,
+        agent_command: &harness.command,
+    })?;
+    state.record(&harness.id, &thread.id, &window);
     state.last_project = Some(thread.cwd.clone());
     state.save(&config::state_path())?;
     tmux.switch_to(&window)
 }
 
-fn thread_match_rank(thread: &codex::Thread, query: &str) -> Option<u8> {
+fn thread_match_rank(thread: &agent::Thread, query: &str) -> Option<u8> {
     let query = query.trim();
     if query.is_empty() {
         return None;
@@ -165,18 +177,19 @@ fn thread_match_rank(thread: &codex::Thread, query: &str) -> Option<u8> {
 
 fn run_thread(
     tmux_config: &config::TmuxConfig,
+    harness_id: &str,
     thread_id: Option<&str>,
     cwd: &PathBuf,
     title: &str,
-    codex_command: &str,
+    agent_command: &str,
 ) -> Result<()> {
     let pane_id = std::env::var_os("TMUX_PANE").map(|value| value.to_string_lossy().into_owned());
     let tmux = tmux::Client::new(tmux_config.clone());
     let existing_id = if thread_id.is_none() {
-        let mut client = codex::Client::start(codex_command)?;
+        let mut client = codex::Client::start(agent_command)?;
         let cwd = tmux::normalized_path(cwd).to_string_lossy().into_owned();
         client
-            .list_threads(false)?
+            .list_threads_inner(false)?
             .into_iter()
             .find(|thread| {
                 thread.name.as_deref() == Some(title)
@@ -189,12 +202,12 @@ fn run_thread(
     let resume_id = thread_id.or(existing_id.as_deref());
     if let Some(pane_id) = &pane_id {
         if let Some(thread_id) = resume_id {
-            tmux.mark_pane(pane_id, thread_id, title)?;
+            tmux.mark_pane(pane_id, harness_id, thread_id, title)?;
         } else {
-            tmux.mark_title(pane_id, title)?;
+            tmux.mark_title(pane_id, harness_id, title)?;
         }
     }
-    let mut command = Command::new(codex_command);
+    let mut command = Command::new(agent_command);
     if let Some(thread_id) = resume_id {
         command.arg("resume").arg(thread_id).arg("-C").arg(cwd);
     } else {
@@ -202,15 +215,15 @@ fn run_thread(
     }
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to run {codex_command}"))?;
+        .with_context(|| format!("failed to run {agent_command}"))?;
     if resume_id.is_none() {
         if let Some(pane_id) = &pane_id {
-            tmux.rename_active_codex_thread(pane_id, title)?;
+            tmux.rename_active_agent_thread(pane_id, title)?;
         }
     }
     let status = child.wait()?;
     if !status.success() {
-        bail!("{codex_command} exited with {status}");
+        bail!("{agent_command} exited with {status}");
     }
     Ok(())
 }
@@ -220,7 +233,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn thread(name: Option<&str>, preview: &str) -> codex::Thread {
+    fn thread(name: Option<&str>, preview: &str) -> agent::Thread {
         serde_json::from_value(json!({
             "id": "thread-1",
             "name": name,

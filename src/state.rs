@@ -3,10 +3,16 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::tmux::Window;
+use crate::{agent::DEFAULT_HARNESS_ID, tmux::Window};
+
+fn default_harness_id() -> String {
+    DEFAULT_HARNESS_ID.into()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Mapping {
+    #[serde(default = "default_harness_id")]
+    pub harness_id: String,
     pub thread_id: String,
     pub window_id: String,
     #[serde(default)]
@@ -65,22 +71,26 @@ impl State {
         self.mappings
             .retain(|mapping| windows.iter().any(|window| mapping.matches(window)));
         for window in windows {
+            if window.thread_id.is_some() && window.harness_id.is_none() {
+                window.harness_id = Some(DEFAULT_HARNESS_ID.into());
+            }
             if window.thread_id.is_none() {
-                window.thread_id = self
-                    .mappings
-                    .iter()
-                    .find(|mapping| mapping.matches(window))
-                    .map(|mapping| mapping.thread_id.clone());
+                if let Some(mapping) = self.mappings.iter().find(|mapping| mapping.matches(window))
+                {
+                    window.harness_id = Some(mapping.harness_id.clone());
+                    window.thread_id = Some(mapping.thread_id.clone());
+                }
             }
         }
     }
 
-    pub fn record(&mut self, thread_id: &str, window: &Window) {
+    pub fn record(&mut self, harness_id: &str, thread_id: &str, window: &Window) {
         self.mappings.retain(|mapping| {
-            mapping.thread_id != thread_id
+            !(mapping.harness_id == harness_id && mapping.thread_id == thread_id)
                 && mapping.pane_id.as_deref() != Some(window.pane_id.as_str())
         });
         self.mappings.push(Mapping {
+            harness_id: harness_id.into(),
             thread_id: thread_id.into(),
             window_id: window.window_id.clone(),
             pane_id: Some(window.pane_id.clone()),
@@ -93,7 +103,12 @@ impl State {
 
 impl Mapping {
     fn matches(&self, window: &Window) -> bool {
-        self.cwd == window.cwd
+        let harness_matches = window
+            .harness_id
+            .as_deref()
+            .is_none_or(|harness_id| harness_id == self.harness_id);
+        harness_matches
+            && self.cwd == window.cwd
             && self
                 .pane_id
                 .as_deref()
@@ -117,6 +132,7 @@ mod tests {
             pane_pid: 1,
             command: "codex".into(),
             cwd: "/repo".into(),
+            harness_id: None,
             thread_id: None,
             chat_title: None,
         }
@@ -125,9 +141,10 @@ mod tests {
     #[test]
     fn restores_only_exact_live_window_mapping() {
         let mut state = State::default();
-        state.record("thread", &window());
+        state.record(DEFAULT_HARNESS_ID, "thread", &window());
         let mut windows = vec![window()];
         state.reconcile(&mut windows);
+        assert_eq!(windows[0].harness_id.as_deref(), Some(DEFAULT_HARNESS_ID));
         assert_eq!(windows[0].thread_id.as_deref(), Some("thread"));
     }
 }

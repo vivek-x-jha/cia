@@ -23,6 +23,7 @@ pub struct CodexConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct TmuxConfig {
     pub command: String,
+    pub agent_commands: Vec<String>,
     pub agent_window_names: Vec<String>,
     pub new_window_prefix: String,
 }
@@ -69,6 +70,7 @@ impl Default for TmuxConfig {
     fn default() -> Self {
         Self {
             command: "tmux".into(),
+            agent_commands: vec!["codex".into()],
             agent_window_names: vec!["agents".into()],
             new_window_prefix: "agent:".into(),
         }
@@ -141,6 +143,7 @@ mod tests {
         let cfg: Config = toml::from_str("[ui]\narchived_default = true\n").unwrap();
         assert!(cfg.ui.archived_default);
         assert_eq!(cfg.codex.command, "codex");
+        assert_eq!(cfg.tmux.agent_commands, vec!["codex"]);
     }
 
     #[test]
