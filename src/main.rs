@@ -8,7 +8,7 @@ mod state;
 mod tmux;
 mod ui;
 
-use std::{path::PathBuf, process::Command};
+use std::{borrow::Cow, path::PathBuf, process::Command};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -247,26 +247,30 @@ fn run_thread(
             tmux.mark_title(pane_id, harness_id, title)?;
         }
     }
-    let mut command = Command::new(agent_command);
+    let cwd = cwd.to_string_lossy().into_owned();
+    let mut args = Vec::new();
     match kind {
         agent::HarnessKind::Codex => {
             if let Some(thread_id) = resume_id {
-                command.arg("resume").arg(thread_id).arg("-C").arg(cwd);
+                args.extend(["resume".into(), thread_id.into(), "-C".into(), cwd.clone()]);
             } else {
-                command.arg("-C").arg(cwd);
+                args.extend(["-C".into(), cwd.clone()]);
             }
         }
         agent::HarnessKind::Pi => {
             if let Some(thread_id) = resume_id {
-                command.arg("--session").arg(thread_id);
+                args.extend(["--session".into(), thread_id.into()]);
             } else {
-                command.arg("--name").arg(title);
+                args.extend(["--name".into(), title.into()]);
             }
         }
     }
+    let command_line = shell_command(agent_command, &args);
+    let mut command = Command::new("zsh");
+    command.args(["-lc", &command_line]);
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to run {agent_command}"))?;
+        .with_context(|| format!("failed to run {agent_command} through zsh"))?;
     if kind == agent::HarnessKind::Codex && resume_id.is_none() {
         if let Some(pane_id) = &pane_id {
             tmux.rename_active_agent_thread(pane_id, title)?;
@@ -277,6 +281,15 @@ fn run_thread(
         bail!("{agent_command} exited with {status}");
     }
     Ok(())
+}
+
+fn shell_command(command: &str, args: &[String]) -> String {
+    let command = std::iter::once(command)
+        .chain(args.iter().map(String::as_str))
+        .map(|value| shell_escape::unix::escape(Cow::Borrowed(value)).into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("exec {command}")
 }
 
 #[cfg(test)]
@@ -310,5 +323,14 @@ mod tests {
 
         let unnamed = thread(None, "First preview line");
         assert_eq!(thread_match_rank(&unnamed, "First preview line"), Some(0));
+    }
+
+    #[test]
+    fn shell_command_execs_with_escaped_arguments() {
+        let args = vec!["resume".into(), "thread; touch nope".into()];
+        assert_eq!(
+            shell_command("codex agent", &args),
+            "exec 'codex agent' resume 'thread; touch nope'"
+        );
     }
 }

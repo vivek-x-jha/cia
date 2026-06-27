@@ -7,7 +7,10 @@ use crossterm::{
         MouseEvent, MouseEventKind,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, size as terminal_size, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{
     backend::CrosstermBackend,
@@ -35,6 +38,31 @@ enum Focus {
     Threads,
     Preview,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StatusAction {
+    Open,
+    New,
+    Search,
+    Archive,
+    Help,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PaneAreas {
+    status: Rect,
+    projects: Rect,
+    threads: Rect,
+    preview: Rect,
+}
+
+const STATUS_ACTIONS: [(&str, StatusAction); 5] = [
+    ("Open (Enter)", StatusAction::Open),
+    ("New (n)", StatusAction::New),
+    ("Search (/)", StatusAction::Search),
+    ("Archive (a)", StatusAction::Archive),
+    ("Help (?)", StatusAction::Help),
+];
 
 pub struct App {
     config: Config,
@@ -348,6 +376,31 @@ impl App {
         self.new_chat_mode = true;
     }
 
+    fn toggle_archived(&mut self) {
+        self.show_archived = !self.show_archived;
+        if let Err(error) = self.refresh() {
+            self.status = error.to_string();
+        }
+        self.load_preview();
+    }
+
+    fn refresh_view(&mut self) {
+        if let Err(error) = self.refresh() {
+            self.status = error.to_string();
+        }
+        self.load_preview();
+    }
+
+    fn run_status_action(&mut self, action: StatusAction) {
+        match action {
+            StatusAction::Open => self.activate(),
+            StatusAction::New => self.begin_new_thread(),
+            StatusAction::Search => self.search_mode = true,
+            StatusAction::Archive => self.toggle_archived(),
+            StatusAction::Help => self.show_help = true,
+        }
+    }
+
     fn submit_new_thread(&mut self) {
         let Some(project) = self.current_project().cloned() else {
             return;
@@ -430,6 +483,9 @@ impl App {
                 KeyCode::Backspace => {
                     self.new_chat_name.pop();
                 }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.new_chat_name.clear();
+                }
                 KeyCode::Char(character)
                     if !key.modifiers.contains(KeyModifiers::CONTROL)
                         && self.new_chat_name.chars().count() < 80 =>
@@ -482,19 +538,8 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.running = false,
             KeyCode::Char('?') => self.show_help = true,
             KeyCode::Char('/') => self.search_mode = true,
-            KeyCode::Char('a') => {
-                self.show_archived = !self.show_archived;
-                if let Err(error) = self.refresh() {
-                    self.status = error.to_string();
-                }
-                self.load_preview();
-            }
-            KeyCode::Char('r') => {
-                if let Err(error) = self.refresh() {
-                    self.status = error.to_string();
-                }
-                self.load_preview();
-            }
+            KeyCode::Char('a') => self.toggle_archived(),
+            KeyCode::Char('r') => self.refresh_view(),
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_next(1)
             }
@@ -519,10 +564,74 @@ impl App {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
+        let Ok((width, height)) = terminal_size() else {
+            return;
+        };
+        let areas = pane_areas(Rect::new(0, 0, width, height));
         match mouse.kind {
             MouseEventKind::ScrollDown => self.scroll_preview(3),
             MouseEventKind::ScrollUp => self.scroll_preview(-3),
+            MouseEventKind::Down(_) => self.handle_click(mouse.column, mouse.row, areas),
             _ => {}
+        }
+    }
+
+    fn handle_click(&mut self, x: u16, y: u16, areas: PaneAreas) {
+        if self.new_chat_mode {
+            self.handle_new_chat_click(x, y);
+            return;
+        }
+        if self.show_help {
+            self.show_help = false;
+            return;
+        }
+        if contains(areas.status, x, y) {
+            if let Some(action) = status_action_at(self, x.saturating_sub(areas.status.x)) {
+                self.run_status_action(action);
+            }
+            return;
+        }
+        if contains(areas.projects, x, y) {
+            self.focus = Focus::Projects;
+            if let Some(index) = list_index_at(y, areas.projects) {
+                if let Some(project_index) = self.visible_project_indices().get(index).copied() {
+                    if project_index != self.project_index {
+                        self.project_index = project_index;
+                        self.row_index = 0;
+                        self.load_preview();
+                    }
+                }
+            }
+            return;
+        }
+        if contains(areas.threads, x, y) {
+            self.focus = Focus::Threads;
+            if let Some(index) = list_index_at(y, areas.threads) {
+                if index < self.current_rows().len() && index != self.row_index {
+                    self.row_index = index;
+                    self.load_preview();
+                }
+            }
+            return;
+        }
+        if contains(areas.preview, x, y) {
+            self.focus = Focus::Preview;
+        }
+    }
+
+    fn handle_new_chat_click(&mut self, x: u16, y: u16) {
+        let Ok((width, height)) = terminal_size() else {
+            return;
+        };
+        let popup = centered(Rect::new(0, 0, width, height), 60, 5);
+        if !contains(popup, x, y) {
+            return;
+        }
+        if self.new_chat_picking_harness {
+            if let Some(index) = harness_index_at(x, y, popup, &self.harnesses) {
+                self.new_chat_harness_index = index;
+                self.new_chat_picking_harness = false;
+            }
         }
     }
 }
@@ -559,31 +668,41 @@ pub fn run(mut app: App) -> Result<()> {
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = ResolvedTheme::from(&app.config.theme);
     let area = frame.area();
+    let areas = pane_areas(area);
+    draw_status_bar(frame, areas.status, app, theme);
+    draw_projects(frame, areas.projects, app, theme);
+    draw_threads(frame, areas.threads, app, theme);
+    draw_preview(frame, areas.preview, app, theme);
+    if app.show_help {
+        draw_help(frame, area, theme);
+    }
+    if app.new_chat_mode {
+        draw_new_chat_prompt(frame, area, app, theme);
+    }
+}
+
+fn pane_areas(area: Rect) -> PaneAreas {
     let outer = Layout::vertical([Constraint::Length(1), Constraint::Min(5)]).split(area);
     let panes = if area.width >= 100 {
         let rows = Layout::vertical([Constraint::Percentage(36), Constraint::Percentage(64)])
             .split(outer[1]);
         let top = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
             .split(rows[0]);
-        vec![top[0], top[1], rows[1]]
+        [top[0], top[1], rows[1]]
     } else {
-        Layout::vertical([
+        let panes = Layout::vertical([
             Constraint::Percentage(25),
             Constraint::Percentage(35),
             Constraint::Percentage(40),
         ])
-        .split(outer[1])
-        .to_vec()
+        .split(outer[1]);
+        [panes[0], panes[1], panes[2]]
     };
-    draw_status_bar(frame, outer[0], app, theme);
-    draw_projects(frame, panes[0], app, theme);
-    draw_threads(frame, panes[1], app, theme);
-    draw_preview(frame, panes[2], app, theme);
-    if app.show_help {
-        draw_help(frame, area, theme);
-    }
-    if app.new_chat_mode {
-        draw_new_chat_prompt(frame, area, app, theme);
+    PaneAreas {
+        status: outer[0],
+        projects: panes[0],
+        threads: panes[1],
+        preview: panes[2],
     }
 }
 
@@ -623,20 +742,15 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
             Style::default().fg(theme.error),
         ));
     }
-    spans.extend([
-        Span::styled(search, Style::default().fg(theme.warning)),
-        Span::styled(" · ", Style::default().fg(theme.muted)),
-        Span::styled("Enter open", Style::default().fg(theme.status_open)),
-        Span::styled(" · ", Style::default().fg(theme.muted)),
-        Span::styled("n new", Style::default().fg(theme.status_new)),
-        Span::styled(" · ", Style::default().fg(theme.muted)),
-        Span::styled("/ search", Style::default().fg(theme.status_search)),
-        Span::styled(" · ", Style::default().fg(theme.muted)),
-        Span::styled("a archive", Style::default().fg(theme.status_archive)),
-        Span::styled(" · ", Style::default().fg(theme.muted)),
-        Span::styled("? help", Style::default().fg(theme.status_help)),
-        Span::styled(" ", Style::default().fg(theme.muted)),
-    ]);
+    spans.push(Span::styled(search, Style::default().fg(theme.warning)));
+    for (label, action) in STATUS_ACTIONS {
+        spans.push(Span::styled(" · ", Style::default().fg(theme.muted)));
+        spans.push(Span::styled(
+            label,
+            Style::default().fg(status_color(action, theme)),
+        ));
+    }
+    spans.push(Span::styled(" ", Style::default().fg(theme.muted)));
     let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -990,6 +1104,87 @@ fn move_index(current: usize, len: usize, delta: isize) -> usize {
         (current as isize + delta).rem_euclid(len as isize) as usize
     }
 }
+
+fn contains(area: Rect, x: u16, y: u16) -> bool {
+    x >= area.x
+        && x < area.x.saturating_add(area.width)
+        && y >= area.y
+        && y < area.y.saturating_add(area.height)
+}
+
+fn list_index_at(y: u16, area: Rect) -> Option<usize> {
+    let inner_top = area.y.saturating_add(1);
+    let inner_bottom = area.y.saturating_add(area.height).saturating_sub(1);
+    (y >= inner_top && y < inner_bottom).then_some((y - inner_top) as usize)
+}
+
+fn status_action_at(app: &App, x: u16) -> Option<StatusAction> {
+    let search = if app.search_mode {
+        format!(" /{}█", app.query)
+    } else if !app.query.is_empty() {
+        format!(" /{}", app.query)
+    } else {
+        String::new()
+    };
+    let project_count = app.projects.len();
+    let thread_count = app
+        .projects
+        .iter()
+        .map(|project| project.threads.len())
+        .sum::<usize>();
+    let count_status = format!("{project_count} projects · {thread_count} threads");
+    let mut offset = 0usize;
+    offset += 1;
+    offset += project_count.to_string().chars().count();
+    offset += " Projects".chars().count();
+    offset += " · ".chars().count();
+    offset += thread_count.to_string().chars().count();
+    offset += " threads".chars().count();
+    if app.status != count_status {
+        offset += " · ".chars().count();
+        offset += app.status.chars().count();
+    }
+    offset += search.chars().count();
+
+    let mut cursor = offset;
+    for (label, action) in STATUS_ACTIONS {
+        cursor += " · ".chars().count();
+        let end = cursor + label.chars().count();
+        if (cursor..end).contains(&(x as usize)) {
+            return Some(action);
+        }
+        cursor = end;
+    }
+    None
+}
+
+fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
+    match action {
+        StatusAction::Open => theme.status_open,
+        StatusAction::New => theme.status_new,
+        StatusAction::Search => theme.status_search,
+        StatusAction::Archive => theme.status_archive,
+        StatusAction::Help => theme.status_help,
+    }
+}
+
+fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Option<usize> {
+    if y != popup.y.saturating_add(1) {
+        return None;
+    }
+    let mut cursor = popup.x.saturating_add(1);
+    for (index, harness) in harnesses.iter().enumerate() {
+        cursor = cursor.saturating_add(1);
+        let width = (harness.label.chars().count() + 2) as u16;
+        let end = cursor.saturating_add(width);
+        if x >= cursor && x < end {
+            return Some(index);
+        }
+        cursor = end;
+    }
+    None
+}
+
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
     Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
