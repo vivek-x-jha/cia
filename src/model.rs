@@ -18,7 +18,7 @@ pub struct Project {
 pub enum Row {
     Agent(Window),
     Thread {
-        thread: Thread,
+        thread: Box<Thread>,
         live: Option<Window>,
     },
 }
@@ -28,7 +28,8 @@ impl Row {
         match self {
             Self::Agent(window) => {
                 let label = window.chat_title.as_deref().unwrap_or(&window.window_name);
-                format!("Live agent · {}:{label}", window.session)
+                let harness = window.harness_id.as_deref().unwrap_or("agent");
+                format!("Live {harness} · {}:{label}", window.session)
             }
             Self::Thread { thread, .. } => thread.title().to_owned(),
         }
@@ -87,43 +88,60 @@ pub fn build_projects(
 }
 
 pub fn rows(project: &Project) -> Vec<Row> {
-    let mapped: HashMap<&str, &Window> = project
+    let mapped: HashMap<(&str, &str), &Window> = project
         .agents
         .iter()
-        .filter_map(|window| window.thread_id.as_deref().map(|id| (id, window)))
+        .filter_map(|window| {
+            let harness_id = window.harness_id.as_deref()?;
+            let thread_id = window.thread_id.as_deref()?;
+            Some(((harness_id, thread_id), window))
+        })
         .collect();
-    let thread_ids: HashSet<&str> = project
+    let thread_ids: HashSet<(&str, &str)> = project
         .threads
         .iter()
-        .map(|thread| thread.id.as_str())
+        .map(|thread| (thread.harness_id.as_str(), thread.id.as_str()))
         .collect();
-    let mut named_agents: HashMap<&str, Vec<&Window>> = HashMap::new();
+    let mut named_agents: HashMap<(&str, &str), Vec<&Window>> = HashMap::new();
     for window in project
         .agents
         .iter()
         .filter(|window| window.thread_id.is_none())
     {
-        if let Some(title) = window.chat_title.as_deref() {
-            named_agents.entry(title).or_default().push(window);
+        if let (Some(harness_id), Some(title)) =
+            (window.harness_id.as_deref(), window.chat_title.as_deref())
+        {
+            named_agents
+                .entry((harness_id, title))
+                .or_default()
+                .push(window);
         }
     }
-    let thread_names: HashSet<&str> = project
+    let thread_names: HashSet<(&str, &str)> = project
         .threads
         .iter()
-        .filter_map(|thread| thread.name.as_deref())
+        .filter_map(|thread| {
+            thread
+                .name
+                .as_deref()
+                .map(|name| (thread.harness_id.as_str(), name))
+        })
         .collect();
     let mut result: Vec<Row> = project
         .agents
         .iter()
         .filter(|window| {
             window.thread_id.as_deref().map_or_else(
-                || {
-                    window
-                        .chat_title
-                        .as_deref()
-                        .is_none_or(|title| !thread_names.contains(title))
+                || match (window.harness_id.as_deref(), window.chat_title.as_deref()) {
+                    (Some(harness_id), Some(title)) => !thread_names.contains(&(harness_id, title)),
+                    _ => true,
                 },
-                |id| !thread_ids.contains(id),
+                |id| {
+                    window
+                        .harness_id
+                        .as_deref()
+                        .is_none_or(|harness_id| !thread_ids.contains(&(harness_id, id)))
+                },
             )
         })
         .cloned()
@@ -131,17 +149,20 @@ pub fn rows(project: &Project) -> Vec<Row> {
         .collect();
     result.extend(project.threads.iter().cloned().map(|thread| {
         let live = mapped
-            .get(thread.id.as_str())
+            .get(&(thread.harness_id.as_str(), thread.id.as_str()))
             .map(|window| (*window).clone())
             .or_else(|| {
                 thread
                     .name
                     .as_deref()
-                    .and_then(|name| named_agents.get(name))
+                    .and_then(|name| named_agents.get(&(thread.harness_id.as_str(), name)))
                     .filter(|windows| windows.len() == 1)
                     .map(|windows| windows[0].clone())
             });
-        Row::Thread { thread, live }
+        Row::Thread {
+            thread: Box::new(thread),
+            live,
+        }
     }));
     result.sort_by_key(|row| {
         (

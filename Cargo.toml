@@ -2,7 +2,7 @@
 name = "cia"
 version = "0.2.0"
 edition = "2021"
-description = "A terminal dashboard for browsing Codex threads and switching tmux-managed agents"
+description = "A terminal dashboard for browsing Codex and Pi chats and switching tmux-managed agents"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/vivek-x-jha/cia"
@@ -18,7 +18,7 @@ ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 shell-escape = "0.1"
-time = { version = "0.3", features = ["formatting", "local-offset"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "parsing"] }
 toml = "0.8"
 
 [dev-dependencies]

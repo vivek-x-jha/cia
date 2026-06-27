@@ -7,6 +7,7 @@ use serde::Deserialize;
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub codex: CodexConfig,
+    pub pi: PiConfig,
     pub tmux: TmuxConfig,
     pub ui: UiConfig,
     pub theme: ThemeConfig,
@@ -17,6 +18,14 @@ pub struct Config {
 pub struct CodexConfig {
     pub command: String,
     pub transcript_turns: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PiConfig {
+    pub command: String,
+    pub session_dir: Option<String>,
+    pub enabled: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -55,6 +64,7 @@ pub struct ThemeConfig {
     pub status_help: String,
     pub preview_user: String,
     pub preview_codex: String,
+    pub preview_pi: String,
 }
 
 impl Default for CodexConfig {
@@ -66,11 +76,21 @@ impl Default for CodexConfig {
     }
 }
 
+impl Default for PiConfig {
+    fn default() -> Self {
+        Self {
+            command: "pi".into(),
+            session_dir: None,
+            enabled: None,
+        }
+    }
+}
+
 impl Default for TmuxConfig {
     fn default() -> Self {
         Self {
             command: "tmux".into(),
-            agent_commands: vec!["codex".into()],
+            agent_commands: vec!["codex".into(), "pi".into()],
             agent_window_names: vec!["agents".into()],
             new_window_prefix: "agent:".into(),
         }
@@ -98,6 +118,7 @@ impl Default for ThemeConfig {
             status_help: "#e5c07b".into(),
             preview_user: "#0000ff".into(),
             preview_codex: "#00ffff".into(),
+            preview_pi: "#eccef0".into(),
         }
     }
 }
@@ -143,7 +164,8 @@ mod tests {
         let cfg: Config = toml::from_str("[ui]\narchived_default = true\n").unwrap();
         assert!(cfg.ui.archived_default);
         assert_eq!(cfg.codex.command, "codex");
-        assert_eq!(cfg.tmux.agent_commands, vec!["codex"]);
+        assert_eq!(cfg.pi.command, "pi");
+        assert_eq!(cfg.tmux.agent_commands, vec!["codex", "pi"]);
     }
 
     #[test]
@@ -152,6 +174,7 @@ mod tests {
         assert_eq!(cfg.theme.status_open, "#112233");
         assert_eq!(cfg.theme.status_projects, "#e6e6e6");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
+        assert_eq!(cfg.theme.preview_pi, "#eccef0");
     }
 
     #[test]

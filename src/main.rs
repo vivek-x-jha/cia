@@ -2,6 +2,7 @@ mod agent;
 mod codex;
 mod config;
 mod model;
+mod pi;
 mod runner;
 mod state;
 mod tmux;
@@ -32,6 +33,9 @@ enum Commands {
         /// Search archived threads instead of active threads
         #[arg(long)]
         archived: bool,
+        /// Harness to search: codex, pi, or all
+        #[arg(long, default_value = "all")]
+        harness: String,
     },
 
     /// Resume an agent thread while preserving tmux metadata
@@ -56,8 +60,12 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let config = config::Config::load()?;
     match args.command {
-        Some(Commands::Open { query, archived }) => {
-            return open_thread_by_query(&config, args.project, &query, archived);
+        Some(Commands::Open {
+            query,
+            archived,
+            harness,
+        }) => {
+            return open_thread_by_query(&config, args.project, &query, archived, &harness);
         }
         Some(Commands::RunThread {
             thread_id,
@@ -93,6 +101,7 @@ fn open_thread_by_query(
     project: Option<PathBuf>,
     query: &str,
     archived: bool,
+    harness_filter: &str,
 ) -> Result<()> {
     let project = project
         .map(Ok)
@@ -101,12 +110,20 @@ fn open_thread_by_query(
     let project = tmux::normalized_path(project)
         .to_string_lossy()
         .into_owned();
-    let mut harness = agent::Harness::start(config)?;
-    let project_threads: Vec<_> = harness
-        .list_threads(archived)?
-        .into_iter()
-        .filter(|thread| tmux::normalized_path(&thread.cwd).to_string_lossy() == project)
-        .collect();
+    let mut harnesses = start_harnesses(config)?;
+    harnesses.retain(|harness| harness_filter == "all" || harness.id == harness_filter);
+    if harnesses.is_empty() {
+        anyhow::bail!("no harness matching `{harness_filter}`");
+    }
+    let mut project_threads = Vec::new();
+    for harness in &mut harnesses {
+        project_threads.extend(
+            harness
+                .list_threads(archived)?
+                .into_iter()
+                .filter(|thread| tmux::normalized_path(&thread.cwd).to_string_lossy() == project),
+        );
+    }
     let thread = (0..=3)
         .find_map(|rank| {
             project_threads
@@ -120,6 +137,10 @@ fn open_thread_by_query(
                 project
             )
         })?;
+    let harness = harnesses
+        .iter()
+        .find(|harness| harness.id == thread.harness_id)
+        .context("matched thread belongs to an unavailable harness")?;
 
     let tmux = tmux::Client::new(config.tmux.clone());
     let mut state = state::State::load(&config::state_path())?;
@@ -149,6 +170,21 @@ fn open_thread_by_query(
     state.last_project = Some(thread.cwd.clone());
     state.save(&config::state_path())?;
     tmux.switch_to(&window)
+}
+
+fn start_harnesses(config: &config::Config) -> Result<Vec<agent::Harness>> {
+    let mut harnesses = Vec::new();
+    let mut errors = Vec::new();
+    for result in agent::Harness::start_all(config) {
+        match result {
+            Ok(harness) => harnesses.push(harness),
+            Err(error) => errors.push(error.to_string()),
+        }
+    }
+    if harnesses.is_empty() {
+        anyhow::bail!("no harnesses available: {}", errors.join("; "));
+    }
+    Ok(harnesses)
 }
 
 fn thread_match_rank(thread: &agent::Thread, query: &str) -> Option<u8> {
@@ -185,7 +221,11 @@ fn run_thread(
 ) -> Result<()> {
     let pane_id = std::env::var_os("TMUX_PANE").map(|value| value.to_string_lossy().into_owned());
     let tmux = tmux::Client::new(tmux_config.clone());
-    let existing_id = if thread_id.is_none() {
+    let kind = match harness_id {
+        agent::PI_HARNESS_ID => agent::HarnessKind::Pi,
+        _ => agent::HarnessKind::Codex,
+    };
+    let existing_id = if kind == agent::HarnessKind::Codex && thread_id.is_none() {
         let mut client = codex::Client::start(agent_command)?;
         let cwd = tmux::normalized_path(cwd).to_string_lossy().into_owned();
         client
@@ -208,15 +248,26 @@ fn run_thread(
         }
     }
     let mut command = Command::new(agent_command);
-    if let Some(thread_id) = resume_id {
-        command.arg("resume").arg(thread_id).arg("-C").arg(cwd);
-    } else {
-        command.arg("-C").arg(cwd);
+    match kind {
+        agent::HarnessKind::Codex => {
+            if let Some(thread_id) = resume_id {
+                command.arg("resume").arg(thread_id).arg("-C").arg(cwd);
+            } else {
+                command.arg("-C").arg(cwd);
+            }
+        }
+        agent::HarnessKind::Pi => {
+            if let Some(thread_id) = resume_id {
+                command.arg("--session").arg(thread_id);
+            } else {
+                command.arg("--name").arg(title);
+            }
+        }
     }
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to run {agent_command}"))?;
-    if resume_id.is_none() {
+    if kind == agent::HarnessKind::Codex && resume_id.is_none() {
         if let Some(pane_id) = &pane_id {
             tmux.rename_active_agent_thread(pane_id, title)?;
         }

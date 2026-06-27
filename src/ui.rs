@@ -22,7 +22,7 @@ use ratatui::{
 };
 
 use crate::{
-    agent::{Harness, Message, Thread},
+    agent::{Harness, Message, Thread, PI_HARNESS_ID},
     config::{state_path, Config, ThemeConfig},
     model::{build_projects, rows, Project, Row},
     state::State,
@@ -40,7 +40,7 @@ pub struct App {
     config: Config,
     cia_command: String,
     username: String,
-    harness: Harness,
+    harnesses: Vec<Harness>,
     tmux: TmuxClient,
     state: State,
     state_path: PathBuf,
@@ -53,6 +53,8 @@ pub struct App {
     search_mode: bool,
     query: String,
     new_chat_mode: bool,
+    new_chat_picking_harness: bool,
+    new_chat_harness_index: usize,
     new_chat_name: String,
     preview: Vec<Message>,
     preview_scroll: u16,
@@ -67,7 +69,17 @@ impl App {
         let state_path = state_path();
         let state = State::load(&state_path)
             .with_context(|| format!("failed to load {}", state_path.display()))?;
-        let harness = Harness::start(&config)?;
+        let mut harnesses = Vec::new();
+        let mut errors = Vec::new();
+        for result in Harness::start_all(&config) {
+            match result {
+                Ok(harness) => harnesses.push(harness),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        if harnesses.is_empty() {
+            anyhow::bail!("no harnesses available: {}", errors.join("; "));
+        }
         let tmux = TmuxClient::new(config.tmux.clone());
         let cia_command = std::env::current_exe()
             .context("failed to locate the CIA executable")?
@@ -81,7 +93,7 @@ impl App {
             config,
             cia_command,
             username,
-            harness,
+            harnesses,
             tmux,
             state,
             state_path,
@@ -94,6 +106,8 @@ impl App {
             search_mode: false,
             query: String::new(),
             new_chat_mode: false,
+            new_chat_picking_harness: false,
+            new_chat_harness_index: 0,
             new_chat_name: String::new(),
             preview: Vec::new(),
             preview_scroll: 0,
@@ -120,7 +134,17 @@ impl App {
     }
 
     fn refresh(&mut self) -> Result<()> {
-        let threads = self.harness.list_threads(self.show_archived)?;
+        let mut threads = Vec::new();
+        let mut errors = Vec::new();
+        for harness in &mut self.harnesses {
+            match harness.list_threads(self.show_archived) {
+                Ok(mut harness_threads) => threads.append(&mut harness_threads),
+                Err(error) => errors.push(format!("{}: {error}", harness.label)),
+            }
+        }
+        if threads.is_empty() && !errors.is_empty() {
+            anyhow::bail!("{}", errors.join("; "));
+        }
         let mut windows = self.tmux.inventory()?;
         self.state.reconcile(&mut windows);
         self.all_windows = windows.clone();
@@ -140,7 +164,22 @@ impl App {
                 .map(|project| project.threads.len())
                 .sum::<usize>()
         );
+        if !errors.is_empty() {
+            self.status = errors.join("; ");
+        }
         Ok(())
+    }
+
+    fn harness(&self, harness_id: &str) -> Option<&Harness> {
+        self.harnesses
+            .iter()
+            .find(|harness| harness.id == harness_id)
+    }
+
+    fn harness_mut(&mut self, harness_id: &str) -> Option<&mut Harness> {
+        self.harnesses
+            .iter_mut()
+            .find(|harness| harness.id == harness_id)
     }
 
     fn current_project(&self) -> Option<&Project> {
@@ -192,12 +231,14 @@ impl App {
         self.preview_scroll = 0;
         let row = self.current_rows().get(self.row_index).cloned();
         if let Some(Row::Thread { thread, .. }) = row {
+            let turns = self.config.codex.transcript_turns;
             match self
-                .harness
-                .read_messages(&thread.id, self.config.codex.transcript_turns)
+                .harness_mut(&thread.harness_id)
+                .map(|harness| harness.read_messages(&thread.id, turns))
+                .transpose()
             {
                 Ok(messages) => {
-                    self.preview = messages;
+                    self.preview = messages.unwrap_or_default();
                 }
                 Err(error) => self.status = error.to_string(),
             }
@@ -277,16 +318,20 @@ impl App {
     }
 
     fn open_thread(&mut self, thread: &Thread) -> Result<()> {
+        let (harness_id, harness_command) = self
+            .harness(&thread.harness_id)
+            .map(|harness| (harness.id.clone(), harness.command.clone()))
+            .context("thread belongs to an unavailable harness")?;
         let window = self.tmux.open_agent(AgentLaunch {
             inventory: &self.all_windows,
             cwd: &thread.cwd,
             title: thread.title(),
-            harness_id: &self.harness.id,
+            harness_id: &harness_id,
             thread_id: Some(&thread.id),
             cia_command: &self.cia_command,
-            agent_command: &self.harness.command,
+            agent_command: &harness_command,
         })?;
-        self.state.record(&self.harness.id, &thread.id, &window);
+        self.state.record(&harness_id, &thread.id, &window);
         self.state.last_project = Some(thread.cwd.clone());
         self.state.save(&self.state_path)?;
         self.tmux.switch_to(&window)
@@ -294,6 +339,12 @@ impl App {
 
     fn begin_new_thread(&mut self) {
         self.new_chat_name.clear();
+        self.new_chat_harness_index = self
+            .harnesses
+            .iter()
+            .position(|harness| harness.id == PI_HARNESS_ID)
+            .unwrap_or(0);
+        self.new_chat_picking_harness = self.harnesses.len() > 1;
         self.new_chat_mode = true;
     }
 
@@ -306,10 +357,18 @@ impl App {
             self.status = "Chat name cannot be empty".into();
             return;
         }
+        let Some((harness_id, harness_command)) = self
+            .harnesses
+            .get(self.new_chat_harness_index)
+            .map(|harness| (harness.id.clone(), harness.command.clone()))
+        else {
+            self.status = "Selected harness is unavailable".into();
+            return;
+        };
         if project
             .threads
             .iter()
-            .any(|thread| thread.name.as_deref() == Some(title))
+            .any(|thread| thread.harness_id == harness_id && thread.name.as_deref() == Some(title))
         {
             self.status = format!("A chat named `{title}` already exists in this project");
             return;
@@ -320,10 +379,10 @@ impl App {
                 inventory: &self.all_windows,
                 cwd: &project.cwd,
                 title,
-                harness_id: &self.harness.id,
+                harness_id: &harness_id,
                 thread_id: None,
                 cia_command: &self.cia_command,
-                agent_command: &self.harness.command,
+                agent_command: &harness_command,
             })
             .and_then(|window| {
                 self.state.last_project = Some(project.cwd.clone());
@@ -341,9 +400,30 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         if self.new_chat_mode {
+            if self.new_chat_picking_harness {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.new_chat_mode = false;
+                        self.new_chat_picking_harness = false;
+                        self.new_chat_name.clear();
+                    }
+                    KeyCode::Enter => self.new_chat_picking_harness = false,
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Up | KeyCode::Char('k') => {
+                        self.new_chat_harness_index =
+                            move_index(self.new_chat_harness_index, self.harnesses.len(), -1);
+                    }
+                    KeyCode::Right | KeyCode::Char('l') | KeyCode::Down | KeyCode::Char('j') => {
+                        self.new_chat_harness_index =
+                            move_index(self.new_chat_harness_index, self.harnesses.len(), 1);
+                    }
+                    _ => {}
+                }
+                return;
+            }
             match key.code {
                 KeyCode::Esc => {
                     self.new_chat_mode = false;
+                    self.new_chat_picking_harness = false;
                     self.new_chat_name.clear();
                 }
                 KeyCode::Enter => self.submit_new_thread(),
@@ -604,7 +684,15 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
             } else {
                 Span::styled("  ", Style::default().fg(theme.muted))
             };
-            ListItem::new(Line::from(vec![marker, Span::raw(row.title())]))
+            let harness = row_harness_id(row)
+                .and_then(|harness_id| app.harness(harness_id))
+                .map(|harness| harness.marker.as_str())
+                .unwrap_or("?");
+            ListItem::new(Line::from(vec![
+                marker,
+                Span::styled(format!("{harness} "), Style::default().fg(theme.muted)),
+                Span::raw(row.title()),
+            ]))
         })
         .collect();
     let mut state = ListState::default().with_selected(Some(app.row_index));
@@ -683,6 +771,10 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                 text.push_line("CIA will switch to this window without guessing which saved thread it contains.");
             }
             Row::Thread { thread, live } => {
+                let harness = app.harness(&thread.harness_id);
+                let harness_label = harness
+                    .map(|harness| harness.label.as_str())
+                    .unwrap_or(thread.harness_id.as_str());
                 text.push_line(Line::styled(
                     thread.title().to_string(),
                     Style::default()
@@ -697,7 +789,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                 text.push_line(Line::styled(
                     format!(
                         "{} · {} · {} · created {} · {}",
-                        app.harness.label,
+                        harness_label,
                         thread.source_label(),
                         branch,
                         format_timestamp(thread.created_at),
@@ -728,6 +820,8 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                             Style::default()
                                 .fg(if is_user {
                                     theme.preview_user
+                                } else if thread.harness_id == PI_HARNESS_ID {
+                                    theme.preview_pi
                                 } else {
                                     theme.preview_codex
                                 })
@@ -758,6 +852,34 @@ fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
 fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
     let popup = centered(area, 60, 5);
     frame.render_widget(Clear, popup);
+    if app.new_chat_picking_harness {
+        let spans = app
+            .harnesses
+            .iter()
+            .enumerate()
+            .flat_map(|(index, harness)| {
+                let style = if index == app.new_chat_harness_index {
+                    Style::default()
+                        .fg(theme.foreground)
+                        .bg(theme.selected)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.muted)
+                };
+                [
+                    Span::raw(" "),
+                    Span::styled(format!(" {} ", harness.label), style),
+                ]
+            })
+            .collect::<Vec<_>>();
+        frame.render_widget(
+            Paragraph::new(Line::from(spans))
+                .block(panel(" New chat harness ", true, theme))
+                .style(Style::default().fg(theme.foreground)),
+            popup,
+        );
+        return;
+    }
     frame.render_widget(
         Paragraph::new(format!(" {}█", app.new_chat_name))
             .block(panel(" New chat name ", true, theme))
@@ -781,6 +903,7 @@ struct ResolvedTheme {
     status_help: Color,
     preview_user: Color,
     preview_codex: Color,
+    preview_pi: Color,
     selected: Color,
     success: Color,
     warning: Color,
@@ -802,6 +925,7 @@ impl From<&ThemeConfig> for ResolvedTheme {
             status_help: color(&value.status_help),
             preview_user: color(&value.preview_user),
             preview_codex: color(&value.preview_codex),
+            preview_pi: color(&value.preview_pi),
             selected: color(&value.selected),
             success: color(&value.success),
             warning: color(&value.warning),
@@ -833,6 +957,14 @@ fn selected(theme: ResolvedTheme) -> Style {
         .bg(theme.selected)
         .add_modifier(Modifier::BOLD)
 }
+
+fn row_harness_id(row: &Row) -> Option<&str> {
+    match row {
+        Row::Agent(window) => window.harness_id.as_deref(),
+        Row::Thread { thread, .. } => Some(thread.harness_id.as_str()),
+    }
+}
+
 fn next_focus(focus: Focus) -> Focus {
     match focus {
         Focus::Projects => Focus::Threads,
