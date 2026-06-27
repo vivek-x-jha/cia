@@ -1,4 +1,8 @@
-use std::{io, path::PathBuf, time::Duration};
+use std::{
+    io,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use crossterm::{
@@ -56,6 +60,19 @@ struct PaneAreas {
     preview: Rect,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClickTarget {
+    Project(usize),
+    Thread(usize),
+    Preview,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LastClick {
+    target: ClickTarget,
+    at: Instant,
+}
+
 const STATUS_ACTIONS: [(&str, StatusAction); 5] = [
     ("Open (Enter)", StatusAction::Open),
     ("New (n)", StatusAction::New),
@@ -63,6 +80,7 @@ const STATUS_ACTIONS: [(&str, StatusAction); 5] = [
     ("Archive (a)", StatusAction::Archive),
     ("Help (?)", StatusAction::Help),
 ];
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
 pub struct App {
     config: Config,
@@ -88,6 +106,7 @@ pub struct App {
     preview_scroll: u16,
     status: String,
     show_help: bool,
+    last_click: Option<LastClick>,
     pending_g: bool,
     running: bool,
 }
@@ -141,6 +160,7 @@ impl App {
             preview_scroll: 0,
             status: String::new(),
             show_help: false,
+            last_click: None,
             pending_g: false,
             running: true,
         };
@@ -583,22 +603,28 @@ impl App {
         }
         if self.show_help {
             self.show_help = false;
+            self.last_click = None;
             return;
         }
         if contains(areas.status, x, y) {
             if let Some(action) = status_action_at(self, x.saturating_sub(areas.status.x)) {
                 self.run_status_action(action);
             }
+            self.last_click = None;
             return;
         }
         if contains(areas.projects, x, y) {
             self.focus = Focus::Projects;
             if let Some(index) = list_index_at(y, areas.projects) {
                 if let Some(project_index) = self.visible_project_indices().get(index).copied() {
+                    let double_click = self.register_click(ClickTarget::Project(project_index));
                     if project_index != self.project_index {
                         self.project_index = project_index;
                         self.row_index = 0;
                         self.load_preview();
+                    }
+                    if double_click {
+                        self.focus = Focus::Threads;
                     }
                 }
             }
@@ -607,15 +633,22 @@ impl App {
         if contains(areas.threads, x, y) {
             self.focus = Focus::Threads;
             if let Some(index) = list_index_at(y, areas.threads) {
-                if index < self.current_rows().len() && index != self.row_index {
-                    self.row_index = index;
-                    self.load_preview();
+                if index < self.current_rows().len() {
+                    let double_click = self.register_click(ClickTarget::Thread(index));
+                    if index != self.row_index {
+                        self.row_index = index;
+                        self.load_preview();
+                    }
+                    if double_click {
+                        self.activate();
+                    }
                 }
             }
             return;
         }
         if contains(areas.preview, x, y) {
             self.focus = Focus::Preview;
+            self.register_click(ClickTarget::Preview);
         }
     }
 
@@ -633,6 +666,15 @@ impl App {
                 self.new_chat_picking_harness = false;
             }
         }
+    }
+
+    fn register_click(&mut self, target: ClickTarget) -> bool {
+        let now = Instant::now();
+        let double_click = self.last_click.is_some_and(|last| {
+            last.target == target && now.duration_since(last.at) <= DOUBLE_CLICK_WINDOW
+        });
+        self.last_click = Some(LastClick { target, at: now });
+        double_click
     }
 }
 
