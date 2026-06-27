@@ -45,6 +45,15 @@ pub struct ThemeConfig {
     pub success: String,
     pub warning: String,
     pub error: String,
+    pub status_projects: String,
+    pub status_threads: String,
+    pub status_open: String,
+    pub status_new: String,
+    pub status_search: String,
+    pub status_archive: String,
+    pub status_help: String,
+    pub preview_user: String,
+    pub preview_codex: String,
 }
 
 impl Default for CodexConfig {
@@ -78,6 +87,15 @@ impl Default for ThemeConfig {
             success: "#9bd5a5".into(),
             warning: "#e5c07b".into(),
             error: "#e06c75".into(),
+            status_projects: "#e6e6e6".into(),
+            status_threads: "#000000".into(),
+            status_open: "#80d7fe".into(),
+            status_new: "#9bd5a5".into(),
+            status_search: "#0000ff".into(),
+            status_archive: "#e06c75".into(),
+            status_help: "#e5c07b".into(),
+            preview_user: "#0000ff".into(),
+            preview_codex: "#00ffff".into(),
         }
     }
 }
@@ -123,6 +141,14 @@ mod tests {
         let cfg: Config = toml::from_str("[ui]\narchived_default = true\n").unwrap();
         assert!(cfg.ui.archived_default);
         assert_eq!(cfg.codex.command, "codex");
+    }
+
+    #[test]
+    fn merges_partial_theme_configuration_with_defaults() {
+        let cfg: Config = toml::from_str("[theme]\nstatus_open = \"#112233\"\n").unwrap();
+        assert_eq!(cfg.theme.status_open, "#112233");
+        assert_eq!(cfg.theme.status_projects, "#e6e6e6");
+        assert_eq!(cfg.theme.preview_codex, "#00ffff");
     }
 
     #[test]

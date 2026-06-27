@@ -424,25 +424,13 @@ impl App {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.scroll_preview(-8)
             }
-            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_focus(Direction::Left)
-            }
-            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_focus(Direction::Down)
-            }
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_focus(Direction::Up)
-            }
-            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_focus(Direction::Right)
-            }
             KeyCode::Char('n') => self.begin_new_thread(),
             KeyCode::Char('G') => self.select_boundary(true),
             KeyCode::Enter => self.activate(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(1),
             KeyCode::Up | KeyCode::Char('k') => self.select_next(-1),
-            KeyCode::Tab => self.focus = next_focus(self.focus),
-            KeyCode::BackTab => self.focus = previous_focus(self.focus),
+            KeyCode::Tab | KeyCode::Char('l') => self.focus = next_focus(self.focus),
+            KeyCode::BackTab | KeyCode::Char('h') => self.focus = previous_focus(self.focus),
             _ => {}
         }
     }
@@ -454,26 +442,6 @@ impl App {
             _ => {}
         }
     }
-
-    fn move_focus(&mut self, direction: Direction) {
-        self.focus = match (self.focus, direction) {
-            (Focus::Projects, Direction::Right) => Focus::Threads,
-            (Focus::Projects, Direction::Down) => Focus::Preview,
-            (Focus::Threads, Direction::Left) => Focus::Projects,
-            (Focus::Threads, Direction::Down) => Focus::Preview,
-            (Focus::Preview, Direction::Left) => Focus::Projects,
-            (Focus::Preview, Direction::Right) | (Focus::Preview, Direction::Up) => Focus::Threads,
-            (focus, _) => focus,
-        };
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Direction {
-    Left,
-    Down,
-    Up,
-    Right,
 }
 
 pub fn run(mut app: App) -> Result<()> {
@@ -508,10 +476,10 @@ pub fn run(mut app: App) -> Result<()> {
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = ResolvedTheme::from(&app.config.theme);
     let area = frame.area();
-    let outer = Layout::vertical([Constraint::Min(5), Constraint::Length(2)]).split(area);
+    let outer = Layout::vertical([Constraint::Length(1), Constraint::Min(5)]).split(area);
     let panes = if area.width >= 100 {
         let rows = Layout::vertical([Constraint::Percentage(36), Constraint::Percentage(64)])
-            .split(outer[0]);
+            .split(outer[1]);
         let top = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
             .split(rows[0]);
         vec![top[0], top[1], rows[1]]
@@ -521,12 +489,22 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             Constraint::Percentage(35),
             Constraint::Percentage(40),
         ])
-        .split(outer[0])
+        .split(outer[1])
         .to_vec()
     };
+    draw_status_bar(frame, outer[0], app, theme);
     draw_projects(frame, panes[0], app, theme);
     draw_threads(frame, panes[1], app, theme);
     draw_preview(frame, panes[2], app, theme);
+    if app.show_help {
+        draw_help(frame, area, theme);
+    }
+    if app.new_chat_mode {
+        draw_new_chat_prompt(frame, area, app, theme);
+    }
+}
+
+fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
     let search = if app.search_mode {
         format!(" /{}█", app.query)
     } else if !app.query.is_empty() {
@@ -534,20 +512,50 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     } else {
         String::new()
     };
-    let footer = format!(
-        " {}{}  ·  Enter open  n new  / search  a archive  ? help ",
-        app.status, search
-    );
-    frame.render_widget(
-        Paragraph::new(footer).style(Style::default().fg(theme.muted)),
-        outer[1],
-    );
-    if app.show_help {
-        draw_help(frame, area, theme);
+    let project_count = app.projects.len();
+    let thread_count = app
+        .projects
+        .iter()
+        .map(|project| project.threads.len())
+        .sum::<usize>();
+    let count_status = format!("{project_count} projects · {thread_count} threads");
+    let mut spans = vec![
+        Span::styled(" ", Style::default().fg(theme.muted)),
+        Span::styled(
+            project_count.to_string(),
+            Style::default().fg(theme.status_projects),
+        ),
+        Span::styled(" Projects", Style::default().fg(theme.status_projects)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
+        Span::styled(
+            thread_count.to_string(),
+            Style::default().fg(theme.status_threads),
+        ),
+        Span::styled(" threads", Style::default().fg(theme.status_threads)),
+    ];
+    if app.status != count_status {
+        spans.push(Span::styled(" · ", Style::default().fg(theme.muted)));
+        spans.push(Span::styled(
+            app.status.clone(),
+            Style::default().fg(theme.error),
+        ));
     }
-    if app.new_chat_mode {
-        draw_new_chat_prompt(frame, area, app, theme);
-    }
+    spans.extend([
+        Span::styled(search, Style::default().fg(theme.warning)),
+        Span::styled("  ·  ", Style::default().fg(theme.muted)),
+        Span::styled("Enter open", Style::default().fg(theme.status_open)),
+        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled("n new", Style::default().fg(theme.status_new)),
+        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled("/ search", Style::default().fg(theme.status_search)),
+        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled("a archive", Style::default().fg(theme.status_archive)),
+        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled("? help", Style::default().fg(theme.status_help)),
+        Span::styled(" ", Style::default().fg(theme.muted)),
+    ]);
+    let line = Line::from(spans);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn draw_projects(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
@@ -714,7 +722,11 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                         text.push_line(Line::styled(
                             role.to_string(),
                             Style::default()
-                                .fg(if is_user { theme.blue } else { theme.accent })
+                                .fg(if is_user {
+                                    theme.preview_user
+                                } else {
+                                    theme.preview_codex
+                                })
                                 .add_modifier(Modifier::BOLD),
                         ));
                         text.push_line(message.text.clone());
@@ -730,7 +742,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     let popup = centered(area, 64, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Ctrl+h/j/k/l      change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
+    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))
@@ -755,7 +767,16 @@ struct ResolvedTheme {
     foreground: Color,
     muted: Color,
     accent: Color,
-    blue: Color,
+    error: Color,
+    status_projects: Color,
+    status_threads: Color,
+    status_open: Color,
+    status_new: Color,
+    status_search: Color,
+    status_archive: Color,
+    status_help: Color,
+    preview_user: Color,
+    preview_codex: Color,
     selected: Color,
     success: Color,
     warning: Color,
@@ -767,7 +788,16 @@ impl From<&ThemeConfig> for ResolvedTheme {
             foreground: color(&value.foreground),
             muted: color(&value.muted),
             accent: color(&value.accent),
-            blue: Color::Blue,
+            error: color(&value.error),
+            status_projects: color(&value.status_projects),
+            status_threads: color(&value.status_threads),
+            status_open: color(&value.status_open),
+            status_new: color(&value.status_new),
+            status_search: color(&value.status_search),
+            status_archive: color(&value.status_archive),
+            status_help: color(&value.status_help),
+            preview_user: color(&value.preview_user),
+            preview_codex: color(&value.preview_codex),
             selected: color(&value.selected),
             success: color(&value.success),
             warning: color(&value.warning),

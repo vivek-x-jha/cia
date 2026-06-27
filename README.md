@@ -108,7 +108,7 @@ Reload tmux, then open CIA with `prefix + g`.
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+h/j/k/l`, `Tab`, `Shift-Tab` | Move focus between projects, chats, and preview |
+| `Tab`, `Shift-Tab`, `h`, `l` | Move focus between projects, chats, and preview |
 | `j`, `Ctrl+n`, `↓` | Move selection down |
 | `k`, `Ctrl+p`, `↑` | Move selection up |
 | `Ctrl+d`, `Ctrl+u` | Scroll the preview down or up |
@@ -183,7 +183,8 @@ $XDG_CONFIG_HOME/cia/config.toml
 ```
 
 Without `XDG_CONFIG_HOME`, the path defaults to `~/.config/cia/config.toml`.
-Every section is optional; omitted values use the defaults below.
+The file is optional. Every section and every key is optional; omitted values
+use the built-in defaults below.
 
 ```toml
 [codex]
@@ -208,9 +209,20 @@ selected = "#30364a"
 success = "#9bd5a5"
 warning = "#e5c07b"
 error = "#e06c75"
+status_projects = "#e6e6e6"
+status_threads = "#000000"
+status_open = "#80d7fe"
+status_new = "#9bd5a5"
+status_search = "#0000ff"
+status_archive = "#e06c75"
+status_help = "#e5c07b"
+preview_user = "#0000ff"
+preview_codex = "#00ffff"
 ```
 
 Unknown keys are rejected so misspellings and stale configuration fail loudly.
+Theme values are six-digit RGB colors. You can override only the colors you
+care about; unset theme keys continue using the defaults above.
 
 ### Configuration reference
 
@@ -222,7 +234,11 @@ Unknown keys are rejected so misspellings and stale configuration fail loudly.
 | `tmux.agent_window_names` | Candidate managed-window names; the first name is used for new and resumed chats |
 | `tmux.new_window_prefix` | Legacy managed-window prefix retained for compatibility |
 | `ui.archived_default` | Show archived threads when CIA starts |
-| `theme.*` | Six-digit RGB colors used by the TUI |
+| `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
+| `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
+| `theme.status_projects`, `theme.status_threads` | Project/thread count and label colors in the top status bar |
+| `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_help` | Action segment colors in the top status bar |
+| `theme.preview_user`, `theme.preview_codex` | Role label colors in the preview pane |
 
 ## Data and Safety
 
