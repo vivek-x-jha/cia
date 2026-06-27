@@ -87,6 +87,14 @@ Preselect the project matching a working directory:
 cia --project "$PWD"
 ```
 
+Open an existing thread directly by name, title, or preview text:
+
+```sh
+cia open "thread name"
+cia --project /path/to/project open "partial title"
+cia open --archived "old thread"
+```
+
 For a tmux-native launcher, add a popup binding:
 
 ```tmux
@@ -100,7 +108,7 @@ Reload tmux, then open CIA with `prefix + g`.
 
 | Key | Action |
 | --- | --- |
-| `Tab`, `Shift-Tab`, `h`, `l` | Move focus between projects, chats, and preview |
+| `Ctrl+h/j/k/l`, `Tab`, `Shift-Tab` | Move focus between projects, chats, and preview |
 | `j`, `Ctrl+n`, `↓` | Move selection down |
 | `k`, `Ctrl+p`, `↑` | Move selection up |
 | `Ctrl+d`, `Ctrl+u` | Scroll the preview down or up |

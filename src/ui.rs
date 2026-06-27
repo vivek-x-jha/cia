@@ -369,6 +369,10 @@ impl App {
                     self.query.pop();
                     self.reset_search_selection();
                 }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.query.clear();
+                    self.reset_search_selection();
+                }
                 KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.query.push(character);
                     self.reset_search_selection();
@@ -420,13 +424,25 @@ impl App {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.scroll_preview(-8)
             }
+            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_focus(Direction::Left)
+            }
+            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_focus(Direction::Down)
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_focus(Direction::Up)
+            }
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_focus(Direction::Right)
+            }
             KeyCode::Char('n') => self.begin_new_thread(),
             KeyCode::Char('G') => self.select_boundary(true),
             KeyCode::Enter => self.activate(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(1),
             KeyCode::Up | KeyCode::Char('k') => self.select_next(-1),
-            KeyCode::Tab | KeyCode::Char('l') => self.focus = next_focus(self.focus),
-            KeyCode::BackTab | KeyCode::Char('h') => self.focus = previous_focus(self.focus),
+            KeyCode::Tab => self.focus = next_focus(self.focus),
+            KeyCode::BackTab => self.focus = previous_focus(self.focus),
             _ => {}
         }
     }
@@ -438,6 +454,26 @@ impl App {
             _ => {}
         }
     }
+
+    fn move_focus(&mut self, direction: Direction) {
+        self.focus = match (self.focus, direction) {
+            (Focus::Projects, Direction::Right) => Focus::Threads,
+            (Focus::Projects, Direction::Down) => Focus::Preview,
+            (Focus::Threads, Direction::Left) => Focus::Projects,
+            (Focus::Threads, Direction::Down) => Focus::Preview,
+            (Focus::Preview, Direction::Left) => Focus::Projects,
+            (Focus::Preview, Direction::Right) | (Focus::Preview, Direction::Up) => Focus::Threads,
+            (focus, _) => focus,
+        };
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    Left,
+    Down,
+    Up,
+    Right,
 }
 
 pub fn run(mut app: App) -> Result<()> {
@@ -698,7 +734,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     let popup = centered(area, 64, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
+    let help = "Navigation\n  Ctrl+h/j/k/l      change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))
