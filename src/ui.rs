@@ -542,15 +542,15 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
     }
     spans.extend([
         Span::styled(search, Style::default().fg(theme.warning)),
-        Span::styled("  ·  ", Style::default().fg(theme.muted)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled("Enter open", Style::default().fg(theme.status_open)),
-        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled("n new", Style::default().fg(theme.status_new)),
-        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled("/ search", Style::default().fg(theme.status_search)),
-        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled("a archive", Style::default().fg(theme.status_archive)),
-        Span::styled("  ", Style::default().fg(theme.muted)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled("? help", Style::default().fg(theme.status_help)),
         Span::styled(" ", Style::default().fg(theme.muted)),
     ]);
