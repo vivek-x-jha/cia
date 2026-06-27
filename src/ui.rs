@@ -508,10 +508,6 @@ pub fn run(mut app: App) -> Result<()> {
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = ResolvedTheme::from(&app.config.theme);
     let area = frame.area();
-    frame.render_widget(
-        Block::default().style(Style::default().bg(theme.background)),
-        area,
-    );
     let outer = Layout::vertical([Constraint::Min(5), Constraint::Length(2)]).split(area);
     let panes = if area.width >= 100 {
         let rows = Layout::vertical([Constraint::Percentage(36), Constraint::Percentage(64)])
@@ -543,7 +539,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         app.status, search
     );
     frame.render_widget(
-        Paragraph::new(footer).style(Style::default().fg(theme.muted).bg(theme.surface)),
+        Paragraph::new(footer).style(Style::default().fg(theme.muted)),
         outer[1],
     );
     if app.show_help {
@@ -738,7 +734,7 @@ fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))
-            .style(Style::default().fg(theme.foreground).bg(theme.surface)),
+            .style(Style::default().fg(theme.foreground)),
         popup,
     );
 }
@@ -749,15 +745,13 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
     frame.render_widget(
         Paragraph::new(format!(" {}█", app.new_chat_name))
             .block(panel(" New chat name ", true, theme))
-            .style(Style::default().fg(theme.foreground).bg(theme.surface)),
+            .style(Style::default().fg(theme.foreground)),
         popup,
     );
 }
 
 #[derive(Clone, Copy)]
 struct ResolvedTheme {
-    background: Color,
-    surface: Color,
     foreground: Color,
     muted: Color,
     accent: Color,
@@ -770,8 +764,6 @@ struct ResolvedTheme {
 impl From<&ThemeConfig> for ResolvedTheme {
     fn from(value: &ThemeConfig) -> Self {
         Self {
-            background: color(&value.background),
-            surface: color(&value.surface),
             foreground: color(&value.foreground),
             muted: color(&value.muted),
             accent: color(&value.accent),
@@ -798,7 +790,7 @@ fn panel<'a>(title: &'a str, focused: bool, theme: ResolvedTheme) -> Block<'a> {
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(if focused { theme.accent } else { theme.muted }))
-        .style(Style::default().fg(theme.foreground).bg(theme.background))
+        .style(Style::default().fg(theme.foreground))
 }
 
 fn selected(theme: ResolvedTheme) -> Style {
