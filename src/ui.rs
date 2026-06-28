@@ -245,7 +245,7 @@ impl App {
                     || project.cwd.to_lowercase().contains(&query)
                     || rows(project)
                         .iter()
-                        .any(|row| row.title().to_lowercase().contains(&query))
+                        .any(|row| self.row_matches_query(row, &query))
             })
             .map(|(index, _)| index)
             .collect()
@@ -253,19 +253,39 @@ impl App {
 
     fn current_rows(&self) -> Vec<Row> {
         let query = self.query.to_lowercase();
+        let project_matches = self.current_project().is_some_and(|project| {
+            project.name.to_lowercase().contains(&query)
+                || project.cwd.to_lowercase().contains(&query)
+        });
         self.current_project()
             .map(rows)
             .unwrap_or_default()
             .into_iter()
             .filter(|row| {
-                query.is_empty()
-                    || self.current_project().is_some_and(|project| {
-                        project.name.to_lowercase().contains(&query)
-                            || project.cwd.to_lowercase().contains(&query)
-                    })
-                    || row.title().to_lowercase().contains(&query)
+                query.is_empty() || project_matches || self.row_matches_query(row, &query)
             })
             .collect()
+    }
+
+    fn row_matches_query(&self, row: &Row, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let contains = |value: &str| value.to_lowercase().contains(query);
+        if contains(&row.title()) {
+            return true;
+        }
+        if let Row::Thread { thread, .. } = row {
+            if contains(&thread.preview) {
+                return true;
+            }
+        }
+        row_harness_id(row).is_some_and(|harness_id| {
+            contains(harness_id)
+                || self
+                    .harness(harness_id)
+                    .is_some_and(|harness| contains(&harness.label) || contains(&harness.marker))
+        })
     }
 
     fn reset_search_selection(&mut self) {
