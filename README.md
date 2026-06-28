@@ -119,7 +119,10 @@ Reload tmux, then open CIA with `prefix + g`.
 | `Enter` | Switch to a live chat or resume a saved thread |
 | `n` | Pick a harness, then name and start a new chat in the selected project |
 | `/` | Search projects and chats |
-| `a` | Toggle archived threads |
+| `a` | Toggle between unarchived chats and all chats |
+| `A` | Archive the selected saved chat |
+| `U` | Unarchive the selected saved chat |
+| `d` | Prompt to delete the selected saved chat from disk |
 | `r` | Refresh agent and tmux state |
 | `?` | Toggle help |
 | `q`, `Esc` | Close CIA |
@@ -251,7 +254,7 @@ care about; unset theme keys continue using the defaults above.
 | `tmux.agent_commands` | Process names treated as live agent panes, for example `["codex", "claude", "opencode", "pi"]` |
 | `tmux.agent_window_names` | Candidate managed-window names; the first name is used for new and resumed chats |
 | `tmux.new_window_prefix` | Legacy managed-window prefix retained for compatibility |
-| `ui.archived_default` | Show archived threads when CIA starts |
+| `ui.archived_default` | Show all chats, including archived chats, when CIA starts |
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
 | `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
 | `theme.status_projects`, `theme.status_threads` | Project/thread count and label colors in the top status bar |
@@ -269,10 +272,9 @@ $XDG_STATE_HOME/cia/state.json
 Without `XDG_STATE_HOME`, this becomes `~/.local/state/cia/state.json`.
 
 The file contains the last selected project and CIA's tmux pane mappings. Each
-mapping records a harness id plus the harness-native thread id. CIA does
-**not** modify Codex databases, Pi session files, archived threads, or
-authentication state. Thread creation, naming, and resume behavior remain owned
-by the underlying agent CLI.
+mapping records a harness id plus the harness-native thread id. CIA does not
+modify transcripts during normal browsing. Archive, unarchive, and delete
+actions intentionally update the selected saved chat via the backing harness.
 
 ## Architecture
 

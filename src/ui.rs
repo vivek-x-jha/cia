@@ -67,6 +67,12 @@ enum ClickTarget {
     Preview,
 }
 
+#[derive(Clone, Debug)]
+struct DeletePrompt {
+    thread: Thread,
+    yes_selected: bool,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct LastClick {
     target: ClickTarget,
@@ -77,7 +83,7 @@ const STATUS_ACTIONS: [(&str, StatusAction); 5] = [
     ("Open (Enter)", StatusAction::Open),
     ("New (n)", StatusAction::New),
     ("Search (/)", StatusAction::Search),
-    ("Archive (a)", StatusAction::Archive),
+    ("All (a)", StatusAction::Archive),
     ("Help (?)", StatusAction::Help),
 ];
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
@@ -106,6 +112,7 @@ pub struct App {
     preview_scroll: u16,
     status: String,
     show_help: bool,
+    delete_prompt: Option<DeletePrompt>,
     last_click: Option<LastClick>,
     pending_g: bool,
     running: bool,
@@ -160,6 +167,7 @@ impl App {
             preview_scroll: 0,
             status: String::new(),
             show_help: false,
+            delete_prompt: None,
             last_click: None,
             pending_g: false,
             running: true,
@@ -185,9 +193,15 @@ impl App {
         let mut threads = Vec::new();
         let mut errors = Vec::new();
         for harness in &mut self.harnesses {
-            match harness.list_threads(self.show_archived) {
+            match harness.list_threads(false) {
                 Ok(mut harness_threads) => threads.append(&mut harness_threads),
                 Err(error) => errors.push(format!("{}: {error}", harness.label)),
+            }
+            if self.show_archived {
+                match harness.list_threads(true) {
+                    Ok(mut harness_threads) => threads.append(&mut harness_threads),
+                    Err(error) => errors.push(format!("{} archived: {error}", harness.label)),
+                }
             }
         }
         if threads.is_empty() && !errors.is_empty() {
@@ -196,6 +210,9 @@ impl App {
         let mut windows = self.tmux.inventory()?;
         self.state.reconcile(&mut windows);
         self.all_windows = windows.clone();
+        if self.show_archived {
+            windows.retain(|window| window.thread_id.is_some() || window.chat_title.is_some());
+        }
         self.projects = build_projects(threads, windows, &self.tmux);
         self.project_index = self
             .project_index
@@ -422,6 +439,66 @@ impl App {
         self.load_preview();
     }
 
+    fn set_selected_archived(&mut self, archived: bool) {
+        let Some(Row::Thread { thread, .. }) = self.current_rows().get(self.row_index).cloned()
+        else {
+            self.status = "Select a saved chat first".into();
+            return;
+        };
+        if thread.archived == archived {
+            self.status = if archived {
+                "Chat is already archived".into()
+            } else {
+                "Chat is already unarchived".into()
+            };
+            return;
+        }
+        let result = self
+            .harness_mut(&thread.harness_id)
+            .context("thread belongs to an unavailable harness")
+            .and_then(|harness| harness.set_archived(&thread.id, archived));
+        match result {
+            Ok(()) => {
+                self.refresh_view();
+                self.status = if archived {
+                    "Archived chat".into()
+                } else {
+                    "Unarchived chat".into()
+                };
+            }
+            Err(error) => self.status = error.to_string(),
+        }
+    }
+
+    fn begin_delete(&mut self) {
+        let Some(Row::Thread { thread, .. }) = self.current_rows().get(self.row_index).cloned()
+        else {
+            self.status = "Select a saved chat first".into();
+            return;
+        };
+        self.delete_prompt = Some(DeletePrompt {
+            thread: *thread,
+            yes_selected: false,
+        });
+    }
+
+    fn confirm_delete(&mut self) {
+        let Some(prompt) = self.delete_prompt.take() else {
+            return;
+        };
+        let result = self
+            .harness_mut(&prompt.thread.harness_id)
+            .context("thread belongs to an unavailable harness")
+            .and_then(|harness| harness.delete_thread(&prompt.thread.id));
+        match result {
+            Ok(()) => {
+                self.refresh_view();
+                self.status = "Deleted chat".into();
+            }
+            Err(error) => self.status = error.to_string(),
+        }
+    }
+
     fn refresh_view(&mut self) {
         if let Err(error) = self.refresh() {
             self.status = error.to_string();
@@ -490,6 +567,31 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
+        if self.delete_prompt.is_some() {
+            match key.code {
+                KeyCode::Esc => self.delete_prompt = None,
+                KeyCode::Enter => {
+                    if self
+                        .delete_prompt
+                        .as_ref()
+                        .is_some_and(|prompt| prompt.yes_selected)
+                    {
+                        self.confirm_delete();
+                    } else {
+                        self.delete_prompt = None;
+                    }
+                }
+                KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => {
+                    if let Some(prompt) = &mut self.delete_prompt {
+                        prompt.yes_selected = !prompt.yes_selected;
+                    }
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') => self.delete_prompt = None,
+                KeyCode::Char('y') | KeyCode::Char('Y') => self.confirm_delete(),
+                _ => {}
+            }
+            return;
+        }
         if self.new_chat_mode {
             if self.new_chat_picking_harness {
                 match key.code {
@@ -577,6 +679,9 @@ impl App {
             KeyCode::Char('?') => self.show_help = true,
             KeyCode::Char('/') => self.search_mode = true,
             KeyCode::Char('a') => self.toggle_archived(),
+            KeyCode::Char('A') => self.set_selected_archived(true),
+            KeyCode::Char('U') => self.set_selected_archived(false),
+            KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => self.begin_delete(),
             KeyCode::Char('r') => self.refresh_view(),
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_next(1)
@@ -739,6 +844,9 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     if app.new_chat_mode {
         draw_new_chat_prompt(frame, area, app, theme);
     }
+    if let Some(prompt) = &app.delete_prompt {
+        draw_delete_prompt(frame, area, prompt, theme);
+    }
 }
 
 fn pane_areas(area: Rect) -> PaneAreas {
@@ -877,7 +985,7 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
         .collect();
     let mut state = ListState::default().with_selected(Some(app.row_index));
     let title = if app.show_archived {
-        " Archived "
+        " All chats "
     } else {
         " Chats "
     };
@@ -1024,10 +1132,61 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     let popup = centered(area, 64, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a archived\n  r refresh     q/Esc close    ? help";
+    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a active/all\n  A archive     U unarchive  d delete\n  r refresh     q/Esc close  ? help";
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))
+            .style(Style::default().fg(theme.foreground)),
+        popup,
+    );
+}
+
+fn draw_delete_prompt(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    prompt: &DeletePrompt,
+    theme: ResolvedTheme,
+) {
+    let popup = centered(area, 72, 7);
+    frame.render_widget(Clear, popup);
+    let path = prompt
+        .thread
+        .path
+        .as_deref()
+        .unwrap_or(prompt.thread.cwd.as_str());
+    let no_style = if !prompt.yes_selected {
+        Style::default()
+            .fg(theme.foreground)
+            .bg(theme.selected)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.muted)
+    };
+    let yes_style = if prompt.yes_selected {
+        Style::default()
+            .fg(theme.foreground)
+            .bg(theme.error)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.muted)
+    };
+    let text = Text::from(vec![
+        Line::from("Delete this chat?"),
+        Line::styled(
+            format!("Will remove {path} from disk."),
+            Style::default().fg(theme.warning),
+        ),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(" No ", no_style),
+            Span::raw("  "),
+            Span::styled(" Yes ", yes_style),
+        ]),
+    ]);
+    frame.render_widget(
+        Paragraph::new(text)
+            .block(panel(" Confirm delete ", true, theme))
             .style(Style::default().fg(theme.foreground)),
         popup,
     );

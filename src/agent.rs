@@ -24,6 +24,10 @@ pub struct Thread {
     pub recency_at: Option<i64>,
     pub source: Value,
     pub git_info: Option<GitInfo>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 fn default_harness_id() -> String {
@@ -76,6 +80,8 @@ pub struct Message {
 pub trait Client {
     fn list_threads(&mut self, archived: bool) -> Result<Vec<Thread>>;
     fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>>;
+    fn set_archived(&mut self, thread_id: &str, archived: bool) -> Result<()>;
+    fn delete_thread(&mut self, thread_id: &str) -> Result<()>;
 }
 
 pub struct Harness {
@@ -135,6 +141,14 @@ impl Harness {
 
     pub fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>> {
         self.client.read_messages(thread_id, turns)
+    }
+
+    pub fn set_archived(&mut self, thread_id: &str, archived: bool) -> Result<()> {
+        self.client.set_archived(thread_id, archived)
+    }
+
+    pub fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
+        self.client.delete_thread(thread_id)
     }
 }
 

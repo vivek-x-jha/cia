@@ -25,10 +25,14 @@ impl Client {
 }
 
 impl crate::agent::Client for Client {
-    fn list_threads(&mut self, _archived: bool) -> Result<Vec<Thread>> {
+    fn list_threads(&mut self, archived: bool) -> Result<Vec<Thread>> {
         let mut threads = Vec::new();
         for path in session_files(&self.session_dir)? {
-            if let Some(thread) = parse_thread(&path)? {
+            if is_archived_path(&self.session_dir, &path) != archived {
+                continue;
+            }
+            if let Some(mut thread) = parse_thread(&path)? {
+                thread.archived = archived;
                 threads.push(thread);
             }
         }
@@ -53,6 +57,35 @@ impl crate::agent::Client for Client {
             }
         }
         Ok(Vec::new())
+    }
+
+    fn set_archived(&mut self, thread_id: &str, archived: bool) -> Result<()> {
+        let Some(path) = find_session_path(&self.session_dir, thread_id)? else {
+            anyhow::bail!("Pi session not found for {thread_id}");
+        };
+        if is_archived_path(&self.session_dir, &path) == archived {
+            return Ok(());
+        }
+        let target_dir = if archived {
+            self.session_dir.join("archived")
+        } else {
+            self.session_dir.clone()
+        };
+        fs::create_dir_all(&target_dir)?;
+        let target = target_dir.join(
+            path.file_name()
+                .context("Pi session path has no file name")?,
+        );
+        fs::rename(&path, target)?;
+        Ok(())
+    }
+
+    fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
+        let Some(path) = find_session_path(&self.session_dir, thread_id)? else {
+            return Ok(());
+        };
+        fs::remove_file(path)?;
+        Ok(())
     }
 }
 
@@ -143,7 +176,27 @@ fn parse_thread(path: &Path) -> Result<Option<Thread>> {
         recency_at: Some(session.updated_at),
         source: json!(PI_HARNESS_ID),
         git_info: None,
+        archived: false,
+        path: Some(path.to_string_lossy().into_owned()),
     }))
+}
+
+fn is_archived_path(root: &Path, path: &Path) -> bool {
+    path.strip_prefix(root).ok().is_some_and(|relative| {
+        relative
+            .components()
+            .next()
+            .is_some_and(|component| component.as_os_str() == "archived")
+    })
+}
+
+fn find_session_path(root: &Path, thread_id: &str) -> Result<Option<PathBuf>> {
+    for path in session_files(root)? {
+        if parse_session(&path)?.id.as_deref() == Some(thread_id) {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_session(path: &Path) -> Result<Session> {

@@ -76,7 +76,10 @@ impl Client {
             )?;
             let page: ListResponse = serde_json::from_value(result)
                 .context("Codex returned an incompatible thread/list response")?;
-            threads.extend(page.data);
+            threads.extend(page.data.into_iter().map(|mut thread| {
+                thread.archived = archived;
+                thread
+            }));
             cursor = page.next_cursor;
             if cursor.is_none() {
                 break;
@@ -95,6 +98,28 @@ impl Client {
             json!({"threadId": thread_id, "includeTurns": true}),
         )?;
         Ok(extract_messages(&result, turns))
+    }
+
+    pub(crate) fn set_archived_inner(&mut self, thread_id: &str, archived: bool) -> Result<()> {
+        let method = if archived {
+            "thread/archive"
+        } else {
+            "thread/unarchive"
+        };
+        self.request(method, json!({"threadId": thread_id}))?;
+        Ok(())
+    }
+
+    pub(crate) fn delete_thread_inner(&mut self, thread_id: &str) -> Result<()> {
+        match self.request("thread/delete", json!({"threadId": thread_id})) {
+            Ok(_) => Ok(()),
+            Err(error) if error.to_string().contains("no rollout found") => {
+                self.request("thread/unarchive", json!({"threadId": thread_id}))?;
+                self.request("thread/delete", json!({"threadId": thread_id}))?;
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub fn stop(&mut self) {
@@ -145,6 +170,14 @@ impl crate::agent::Client for Client {
 
     fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>> {
         self.read_messages_inner(thread_id, turns)
+    }
+
+    fn set_archived(&mut self, thread_id: &str, archived: bool) -> Result<()> {
+        self.set_archived_inner(thread_id, archived)
+    }
+
+    fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
+        self.delete_thread_inner(thread_id)
     }
 }
 
@@ -256,6 +289,8 @@ for line in sys.stdin:
         result = {'data': [{'id':'thread-1','name':'Test','preview':'hello','cwd':'/tmp/project','createdAt':1,'updatedAt':2,'recencyAt':2,'source':'cli','gitInfo':None}], 'nextCursor': None}
     elif method == 'thread/read':
         result = {'thread': {'turns': [{'items': [{'type':'agentMessage','text':'done'}]}]}}
+    elif method == 'thread/archive' or method == 'thread/unarchive' or method == 'thread/delete':
+        result = {}
     print(json.dumps({'id': message['id'], 'result': result}), flush=True)
 "#,
         )
@@ -270,5 +305,7 @@ for line in sys.stdin:
             client.read_messages_inner("thread-1", 3).unwrap()[0].text,
             "done"
         );
+        client.set_archived_inner("thread-1", true).unwrap();
+        client.delete_thread_inner("thread-1").unwrap();
     }
 }
