@@ -177,7 +177,6 @@ fn parse_thread(path: &Path) -> Result<Option<Thread>> {
         source: json!(PI_HARNESS_ID),
         git_info: None,
         archived: false,
-        path: Some(path.to_string_lossy().into_owned()),
     }))
 }
 

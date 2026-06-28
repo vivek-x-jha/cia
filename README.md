@@ -122,7 +122,7 @@ Reload tmux, then open CIA with `prefix + g`.
 | `a` | Toggle between unarchived chats and all chats |
 | `A` | Archive the selected saved chat |
 | `U` | Unarchive the selected saved chat |
-| `d` | Prompt to delete the selected saved chat from disk |
+| `d` | Prompt to delete the focused project folder, or the selected saved chat and chat folder |
 | `r` | Refresh agent and tmux state |
 | `?` | Toggle help |
 | `q`, `Esc` | Close CIA |
@@ -231,10 +231,14 @@ status_open = "#80d7fe"
 status_new = "#9bd5a5"
 status_search = "#0000ff"
 status_archive = "#e06c75"
+status_archive_action = "#e06c75"
+status_unarchive = "#c678dd"
+status_delete = "#e06c75"
 status_help = "#e5c07b"
 preview_user = "#0000ff"
 preview_codex = "#00ffff"
 preview_pi = "#00ffff"
+preview_text = "#e6e6e6"
 ```
 
 Unknown keys are rejected so misspellings and stale configuration fail loudly.
@@ -258,8 +262,9 @@ care about; unset theme keys continue using the defaults above.
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
 | `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
 | `theme.status_projects`, `theme.status_threads` | Project/thread count and label colors in the top status bar |
-| `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_help` | Action segment colors in the top status bar |
+| `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Action segment colors in the top status bar |
 | `theme.preview_user`, `theme.preview_codex`, `theme.preview_pi` | Role label colors in the preview pane |
+| `theme.preview_text` | User and harness message text color in the preview pane |
 
 ## Data and Safety
 

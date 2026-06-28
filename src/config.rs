@@ -61,10 +61,14 @@ pub struct ThemeConfig {
     pub status_new: String,
     pub status_search: String,
     pub status_archive: String,
+    pub status_archive_action: String,
+    pub status_unarchive: String,
+    pub status_delete: String,
     pub status_help: String,
     pub preview_user: String,
     pub preview_codex: String,
     pub preview_pi: String,
+    pub preview_text: String,
 }
 
 impl Default for CodexConfig {
@@ -115,10 +119,14 @@ impl Default for ThemeConfig {
             status_new: "#9bd5a5".into(),
             status_search: "#0000ff".into(),
             status_archive: "#e06c75".into(),
+            status_archive_action: "#e06c75".into(),
+            status_unarchive: "#c678dd".into(),
+            status_delete: "#e06c75".into(),
             status_help: "#e5c07b".into(),
             preview_user: "#0000ff".into(),
             preview_codex: "#00ffff".into(),
             preview_pi: "#00ffff".into(),
+            preview_text: "#e6e6e6".into(),
         }
     }
 }

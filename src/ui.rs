@@ -1,6 +1,7 @@
 use std::{
-    io,
-    path::PathBuf,
+    collections::HashSet,
+    fs, io,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -48,7 +49,10 @@ enum StatusAction {
     Open,
     New,
     Search,
-    Archive,
+    ToggleArchived,
+    SetArchived,
+    SetUnarchived,
+    Delete,
     Help,
 }
 
@@ -69,8 +73,14 @@ enum ClickTarget {
 
 #[derive(Clone, Debug)]
 struct DeletePrompt {
-    thread: Thread,
+    target: DeleteTarget,
     yes_selected: bool,
+}
+
+#[derive(Clone, Debug)]
+enum DeleteTarget {
+    Project { name: String, cwd: String },
+    Chat { thread: Thread },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,13 +89,6 @@ struct LastClick {
     at: Instant,
 }
 
-const STATUS_ACTIONS: [(&str, StatusAction); 5] = [
-    ("Open (Enter)", StatusAction::Open),
-    ("New (n)", StatusAction::New),
-    ("Search (/)", StatusAction::Search),
-    ("All (a)", StatusAction::Archive),
-    ("Help (?)", StatusAction::Help),
-];
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
 pub struct App {
@@ -190,28 +193,57 @@ impl App {
     }
 
     fn refresh(&mut self) -> Result<()> {
-        let mut threads = Vec::new();
+        let mut active_threads = Vec::new();
+        let mut archived_threads = Vec::new();
         let mut errors = Vec::new();
         for harness in &mut self.harnesses {
             match harness.list_threads(false) {
-                Ok(mut harness_threads) => threads.append(&mut harness_threads),
+                Ok(mut harness_threads) => active_threads.append(&mut harness_threads),
                 Err(error) => errors.push(format!("{}: {error}", harness.label)),
             }
-            if self.show_archived {
-                match harness.list_threads(true) {
-                    Ok(mut harness_threads) => threads.append(&mut harness_threads),
-                    Err(error) => errors.push(format!("{} archived: {error}", harness.label)),
-                }
+            match harness.list_threads(true) {
+                Ok(mut harness_threads) => archived_threads.append(&mut harness_threads),
+                Err(error) => errors.push(format!("{} archived: {error}", harness.label)),
             }
         }
-        if threads.is_empty() && !errors.is_empty() {
+        if active_threads.is_empty() && archived_threads.is_empty() && !errors.is_empty() {
             anyhow::bail!("{}", errors.join("; "));
+        }
+        let archived_thread_ids: HashSet<(String, String)> = archived_threads
+            .iter()
+            .map(|thread| (thread.harness_id.clone(), thread.id.clone()))
+            .collect();
+        let archived_thread_names: HashSet<(String, String, String)> = archived_threads
+            .iter()
+            .filter_map(|thread| {
+                thread.name.as_ref().map(|name| {
+                    (
+                        thread.harness_id.clone(),
+                        name.clone(),
+                        crate::tmux::normalized_path(&thread.cwd)
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                })
+            })
+            .collect();
+        let mut threads = active_threads;
+        if self.show_archived {
+            threads.append(&mut archived_threads);
         }
         let mut windows = self.tmux.inventory()?;
         self.state.reconcile(&mut windows);
         self.all_windows = windows.clone();
         if self.show_archived {
             windows.retain(|window| window.thread_id.is_some() || window.chat_title.is_some());
+        } else {
+            windows.retain(|window| {
+                !window_matches_archived_thread(
+                    window,
+                    &archived_thread_ids,
+                    &archived_thread_names,
+                )
+            });
         }
         self.projects = build_projects(threads, windows, &self.tmux);
         self.project_index = self
@@ -446,11 +478,7 @@ impl App {
             return;
         };
         if thread.archived == archived {
-            self.status = if archived {
-                "Chat is already archived".into()
-            } else {
-                "Chat is already unarchived".into()
-            };
+            self.refresh_view();
             return;
         }
         let result = self
@@ -458,26 +486,35 @@ impl App {
             .context("thread belongs to an unavailable harness")
             .and_then(|harness| harness.set_archived(&thread.id, archived));
         match result {
-            Ok(()) => {
-                self.refresh_view();
-                self.status = if archived {
-                    "Archived chat".into()
-                } else {
-                    "Unarchived chat".into()
-                };
-            }
+            Ok(()) => self.refresh_view(),
             Err(error) => self.status = error.to_string(),
         }
     }
 
     fn begin_delete(&mut self) {
-        let Some(Row::Thread { thread, .. }) = self.current_rows().get(self.row_index).cloned()
-        else {
-            self.status = "Select a saved chat first".into();
-            return;
+        let target = match self.focus {
+            Focus::Projects => {
+                let Some(project) = self.current_project() else {
+                    self.status = "Select a project first".into();
+                    return;
+                };
+                DeleteTarget::Project {
+                    name: project.name.clone(),
+                    cwd: project.cwd.clone(),
+                }
+            }
+            Focus::Threads | Focus::Preview => {
+                let Some(Row::Thread { thread, .. }) =
+                    self.current_rows().get(self.row_index).cloned()
+                else {
+                    self.status = "Select a saved chat first".into();
+                    return;
+                };
+                DeleteTarget::Chat { thread: *thread }
+            }
         };
         self.delete_prompt = Some(DeletePrompt {
-            thread: *thread,
+            target,
             yes_selected: false,
         });
     }
@@ -486,17 +523,24 @@ impl App {
         let Some(prompt) = self.delete_prompt.take() else {
             return;
         };
-        let result = self
-            .harness_mut(&prompt.thread.harness_id)
-            .context("thread belongs to an unavailable harness")
-            .and_then(|harness| harness.delete_thread(&prompt.thread.id));
+        let result = match prompt.target {
+            DeleteTarget::Project { cwd, .. } => remove_path_from_disk(Path::new(&cwd)),
+            DeleteTarget::Chat { thread } => self.delete_chat_and_folder(&thread),
+        };
         match result {
             Ok(()) => {
                 self.refresh_view();
-                self.status = "Deleted chat".into();
+                self.status = "Deleted".into();
             }
             Err(error) => self.status = error.to_string(),
         }
+    }
+
+    fn delete_chat_and_folder(&mut self, thread: &Thread) -> Result<()> {
+        self.harness_mut(&thread.harness_id)
+            .context("thread belongs to an unavailable harness")?
+            .delete_thread(&thread.id)?;
+        remove_path_from_disk(Path::new(&thread.cwd))
     }
 
     fn refresh_view(&mut self) {
@@ -511,7 +555,10 @@ impl App {
             StatusAction::Open => self.activate(),
             StatusAction::New => self.begin_new_thread(),
             StatusAction::Search => self.search_mode = true,
-            StatusAction::Archive => self.toggle_archived(),
+            StatusAction::ToggleArchived => self.toggle_archived(),
+            StatusAction::SetArchived => self.set_selected_archived(true),
+            StatusAction::SetUnarchived => self.set_selected_archived(false),
+            StatusAction::Delete => self.begin_delete(),
             StatusAction::Help => self.show_help = true,
         }
     }
@@ -911,7 +958,7 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
         ));
     }
     spans.push(Span::styled(search, Style::default().fg(theme.warning)));
-    for (label, action) in STATUS_ACTIONS {
+    for (label, action) in status_actions(app) {
         spans.push(Span::styled(" · ", Style::default().fg(theme.muted)));
         spans.push(Span::styled(
             label,
@@ -1090,11 +1137,15 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                 }
                 text.push_line("");
                 if app.preview.is_empty() {
-                    text.push_line(if thread.preview.is_empty() {
+                    let preview = if thread.preview.is_empty() {
                         "No transcript preview available.".to_string()
                     } else {
                         thread.preview.clone()
-                    });
+                    };
+                    text.push_line(Line::styled(
+                        preview,
+                        Style::default().fg(theme.preview_text),
+                    ));
                 } else {
                     for message in &app.preview {
                         let is_user = message.role == "You";
@@ -1119,7 +1170,10 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                                 })
                                 .add_modifier(Modifier::BOLD),
                         ));
-                        text.push_line(message.text.clone());
+                        text.push_line(Line::styled(
+                            message.text.clone(),
+                            Style::default().fg(theme.preview_text),
+                        ));
                         text.push_line("");
                     }
                 }
@@ -1147,13 +1201,21 @@ fn draw_delete_prompt(
     prompt: &DeletePrompt,
     theme: ResolvedTheme,
 ) {
-    let popup = centered(area, 72, 7);
+    let popup = centered(area, 76, 8);
     frame.render_widget(Clear, popup);
-    let path = prompt
-        .thread
-        .path
-        .as_deref()
-        .unwrap_or(prompt.thread.cwd.as_str());
+    let (title, warning) = match &prompt.target {
+        DeleteTarget::Project { name, cwd } => (
+            format!("Delete project {name}?"),
+            format!("Will remove project folder {cwd} from disk."),
+        ),
+        DeleteTarget::Chat { thread } => (
+            format!("Delete chat {}?", thread.title()),
+            format!(
+                "Will delete saved chat and remove {} from disk.",
+                thread.cwd
+            ),
+        ),
+    };
     let no_style = if !prompt.yes_selected {
         Style::default()
             .fg(theme.foreground)
@@ -1171,11 +1233,8 @@ fn draw_delete_prompt(
         Style::default().fg(theme.muted)
     };
     let text = Text::from(vec![
-        Line::from("Delete this chat?"),
-        Line::styled(
-            format!("Will remove {path} from disk."),
-            Style::default().fg(theme.warning),
-        ),
+        Line::from(title),
+        Line::styled(warning, Style::default().fg(theme.warning)),
         Line::from(""),
         Line::from(vec![
             Span::raw("  "),
@@ -1243,10 +1302,14 @@ struct ResolvedTheme {
     status_new: Color,
     status_search: Color,
     status_archive: Color,
+    status_archive_action: Color,
+    status_unarchive: Color,
+    status_delete: Color,
     status_help: Color,
     preview_user: Color,
     preview_codex: Color,
     preview_pi: Color,
+    preview_text: Color,
     selected: Color,
     success: Color,
     warning: Color,
@@ -1265,10 +1328,14 @@ impl From<&ThemeConfig> for ResolvedTheme {
             status_new: color(&value.status_new),
             status_search: color(&value.status_search),
             status_archive: color(&value.status_archive),
+            status_archive_action: color(&value.status_archive_action),
+            status_unarchive: color(&value.status_unarchive),
+            status_delete: color(&value.status_delete),
             status_help: color(&value.status_help),
             preview_user: color(&value.preview_user),
             preview_codex: color(&value.preview_codex),
             preview_pi: color(&value.preview_pi),
+            preview_text: color(&value.preview_text),
             selected: color(&value.selected),
             success: color(&value.success),
             warning: color(&value.warning),
@@ -1312,6 +1379,40 @@ fn fuzzy_matches(value: &str, query: &str) -> bool {
 
 fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(query)
+}
+
+fn remove_path_from_disk(path: &Path) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => {
+            fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
+        }
+        Ok(_) => {
+            fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn window_matches_archived_thread(
+    window: &Window,
+    archived_thread_ids: &HashSet<(String, String)>,
+    archived_thread_names: &HashSet<(String, String, String)>,
+) -> bool {
+    if let (Some(harness_id), Some(thread_id)) =
+        (window.harness_id.as_ref(), window.thread_id.as_ref())
+    {
+        return archived_thread_ids.contains(&(harness_id.clone(), thread_id.clone()));
+    }
+    if let (Some(harness_id), Some(chat_title)) =
+        (window.harness_id.as_ref(), window.chat_title.as_ref())
+    {
+        let cwd = crate::tmux::normalized_path(&window.cwd)
+            .to_string_lossy()
+            .into_owned();
+        return archived_thread_names.contains(&(harness_id.clone(), chat_title.clone(), cwd));
+    }
+    false
 }
 
 fn row_harness_id(row: &Row) -> Option<&str> {
@@ -1385,7 +1486,7 @@ fn status_action_at(app: &App, x: u16) -> Option<StatusAction> {
     offset += search.chars().count();
 
     let mut cursor = offset;
-    for (label, action) in STATUS_ACTIONS {
+    for (label, action) in status_actions(app) {
         cursor += " · ".chars().count();
         let end = cursor + label.chars().count();
         if (cursor..end).contains(&(x as usize)) {
@@ -1396,12 +1497,32 @@ fn status_action_at(app: &App, x: u16) -> Option<StatusAction> {
     None
 }
 
+fn status_actions(app: &App) -> Vec<(&'static str, StatusAction)> {
+    let archive_action = if app.show_archived {
+        ("Unarchive (U)", StatusAction::SetUnarchived)
+    } else {
+        ("Archive (A)", StatusAction::SetArchived)
+    };
+    vec![
+        ("Search (/)", StatusAction::Search),
+        ("Open (Enter)", StatusAction::Open),
+        ("New (n)", StatusAction::New),
+        ("All (a)", StatusAction::ToggleArchived),
+        archive_action,
+        ("Delete (d)", StatusAction::Delete),
+        ("Help (?)", StatusAction::Help),
+    ]
+}
+
 fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
     match action {
         StatusAction::Open => theme.status_open,
         StatusAction::New => theme.status_new,
         StatusAction::Search => theme.status_search,
-        StatusAction::Archive => theme.status_archive,
+        StatusAction::ToggleArchived => theme.status_archive,
+        StatusAction::SetArchived => theme.status_archive_action,
+        StatusAction::SetUnarchived => theme.status_unarchive,
+        StatusAction::Delete => theme.status_delete,
         StatusAction::Help => theme.status_help,
     }
 }

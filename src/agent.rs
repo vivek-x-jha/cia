@@ -26,8 +26,6 @@ pub struct Thread {
     pub git_info: Option<GitInfo>,
     #[serde(default)]
     pub archived: bool,
-    #[serde(default)]
-    pub path: Option<String>,
 }
 
 fn default_harness_id() -> String {
