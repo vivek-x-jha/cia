@@ -209,7 +209,7 @@ fn parse_session(path: &Path) -> Result<Session> {
                     }
                 }
             }
-            "session_name" | "name" => {
+            "session_info" | "session_name" | "name" => {
                 session.name = record.name.or(record.display_name).or(session.name);
             }
             _ => {}
@@ -289,5 +289,24 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn favors_pi_session_info_name_over_first_user_message() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session.jsonl");
+        fs::write(
+            &path,
+            r#"{"type":"session","version":3,"id":"pi-1","timestamp":"2026-06-27T20:26:07.719Z","cwd":"/tmp/repo"}
+{"type":"session_info","id":"event-1","parentId":null,"timestamp":"2026-06-27T20:26:07.719Z","name":"clean-chat-title"}
+{"type":"message","timestamp":"2026-06-27T20:29:49.237Z","message":{"role":"user","content":[{"type":"text","text":"This is a very long first prompt that should not be used when a session name exists."}]}}
+"#,
+        )
+        .unwrap();
+
+        let thread = parse_thread(&path).unwrap().unwrap();
+        assert_eq!(thread.id, "pi-1");
+        assert_eq!(thread.name.as_deref(), Some("clean-chat-title"));
+        assert_eq!(thread.title(), "clean-chat-title");
     }
 }
