@@ -241,8 +241,8 @@ impl App {
             .enumerate()
             .filter(|(_, project)| {
                 query.is_empty()
-                    || project.name.to_lowercase().contains(&query)
-                    || project.cwd.to_lowercase().contains(&query)
+                    || fuzzy_matches(&project.name, &query)
+                    || fuzzy_matches(&project.cwd, &query)
                     || rows(project)
                         .iter()
                         .any(|row| self.row_matches_query(row, &query))
@@ -254,8 +254,7 @@ impl App {
     fn current_rows(&self) -> Vec<Row> {
         let query = self.query.to_lowercase();
         let project_matches = self.current_project().is_some_and(|project| {
-            project.name.to_lowercase().contains(&query)
-                || project.cwd.to_lowercase().contains(&query)
+            fuzzy_matches(&project.name, &query) || fuzzy_matches(&project.cwd, &query)
         });
         self.current_project()
             .map(rows)
@@ -271,20 +270,19 @@ impl App {
         if query.is_empty() {
             return true;
         }
-        let contains = |value: &str| value.to_lowercase().contains(query);
-        if contains(&row.title()) {
+        if fuzzy_matches(&row.title(), query) {
             return true;
         }
         if let Row::Thread { thread, .. } = row {
-            if contains(&thread.preview) {
+            if contains_ignore_case(&thread.preview, query) {
                 return true;
             }
         }
         row_harness_id(row).is_some_and(|harness_id| {
-            contains(harness_id)
-                || self
-                    .harness(harness_id)
-                    .is_some_and(|harness| contains(&harness.label) || contains(&harness.marker))
+            fuzzy_matches(harness_id, query)
+                || self.harness(harness_id).is_some_and(|harness| {
+                    fuzzy_matches(&harness.label, query) || fuzzy_matches(&harness.marker, query)
+                })
         })
     }
 
@@ -1141,6 +1139,20 @@ fn selected(theme: ResolvedTheme) -> Style {
     Style::default()
         .bg(theme.selected)
         .add_modifier(Modifier::BOLD)
+}
+
+fn fuzzy_matches(value: &str, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let mut chars = value.chars().flat_map(char::to_lowercase);
+    query
+        .chars()
+        .all(|query_char| chars.any(|value_char| value_char == query_char))
+}
+
+fn contains_ignore_case(value: &str, query: &str) -> bool {
+    value.to_lowercase().contains(query)
 }
 
 fn row_harness_id(row: &Row) -> Option<&str> {
