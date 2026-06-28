@@ -854,7 +854,8 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
     let items: Vec<ListItem> = app
         .current_rows()
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(index, row)| {
             let marker = if row.is_live() {
                 Span::styled("● ", Style::default().fg(theme.success))
             } else {
@@ -862,11 +863,16 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
             };
             let harness = row_harness_id(row)
                 .and_then(|harness_id| app.harness(harness_id))
-                .map(|harness| harness.marker.as_str())
+                .map(|harness| harness.label.as_str())
                 .unwrap_or("?");
+            let harness_color = if index == app.row_index {
+                Color::Cyan
+            } else {
+                theme.muted
+            };
             ListItem::new(Line::from(vec![
                 marker,
-                Span::styled(format!("{harness} "), Style::default().fg(theme.muted)),
+                Span::styled(format!("{harness} "), Style::default().fg(harness_color)),
                 Span::raw(row.title()),
             ]))
         })
@@ -1133,7 +1139,6 @@ fn panel<'a>(title: &'a str, focused: bool, theme: ResolvedTheme) -> Block<'a> {
 
 fn selected(theme: ResolvedTheme) -> Style {
     Style::default()
-        .fg(theme.foreground)
         .bg(theme.selected)
         .add_modifier(Modifier::BOLD)
 }
