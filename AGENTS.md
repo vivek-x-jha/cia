@@ -4,15 +4,28 @@
 
 CIA is a Rust/Ratatui tmux dashboard for Codex and Pi chats. It reads agent history and switches/launches managed tmux panes; it should not mutate agent-owned history.
 
-## Commands
+## Test and Build
 
-Run through `zsh -lc` on this machine so dotfiles PATH/env are loaded:
+Run commands through `zsh -lc` on this machine so dotfiles PATH/env are loaded.
+
+Before building or installing, run the automated checks:
 
 ```sh
 zsh -lc 'cargo fmt --check'
 zsh -lc 'cargo test'
 zsh -lc 'cargo clippy --all-targets -- -D warnings'
+```
+
+To manually evaluate UI or backend behavior from the current working tree, run before installing:
+
+```sh
 zsh -lc 'cargo run'
+```
+
+If the behavior is acceptable, update the installed binary:
+
+```sh
+zsh -lc 'cargo install --path .'
 ```
 
 ## Architecture
