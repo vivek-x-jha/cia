@@ -121,6 +121,7 @@ pub struct ThemeConfig {
     pub preview_title: String,
     pub preview_metadata_key: String,
     pub preview_metadata_thread: String,
+    pub preview_metadata_context: String,
     pub preview_metadata_date: String,
     pub preview_metadata_path: String,
     pub new_chat_unfocused: String,
@@ -253,6 +254,7 @@ impl Default for ThemeConfig {
             preview_title: "$CYAN_HEX".into(),
             preview_metadata_key: "$BLACK_HEX".into(),
             preview_metadata_thread: "$YELLOW_HEX".into(),
+            preview_metadata_context: "$GREEN_HEX".into(),
             preview_metadata_date: "$BRIGHTMAGENTA_HEX".into(),
             preview_metadata_path: "$BLUE_HEX".into(),
             new_chat_unfocused: "$BRIGHTBLACK_HEX".into(),
@@ -384,6 +386,7 @@ impl ThemeConfig {
         self.preview_title = expand_env_vars(&self.preview_title);
         self.preview_metadata_key = expand_env_vars(&self.preview_metadata_key);
         self.preview_metadata_thread = expand_env_vars(&self.preview_metadata_thread);
+        self.preview_metadata_context = expand_env_vars(&self.preview_metadata_context);
         self.preview_metadata_date = expand_env_vars(&self.preview_metadata_date);
         self.preview_metadata_path = expand_env_vars(&self.preview_metadata_path);
         self.new_chat_unfocused = expand_env_vars(&self.new_chat_unfocused);
@@ -482,6 +485,7 @@ mod tests {
         assert_eq!(cfg.theme.preview_title, "$CYAN_HEX");
         assert_eq!(cfg.theme.preview_metadata_key, "$BLACK_HEX");
         assert_eq!(cfg.theme.preview_metadata_thread, "$YELLOW_HEX");
+        assert_eq!(cfg.theme.preview_metadata_context, "$GREEN_HEX");
         assert_eq!(cfg.theme.preview_metadata_date, "$BRIGHTMAGENTA_HEX");
         assert_eq!(cfg.theme.preview_metadata_path, "$BLUE_HEX");
         assert_eq!(cfg.theme.new_chat_unfocused, "$BRIGHTBLACK_HEX");

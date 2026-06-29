@@ -145,6 +145,7 @@ fn parse_thread(path: &Path) -> Result<Option<Thread>> {
         created_at: session.created_at,
         updated_at: session.updated_at,
         recency_at: Some(session.updated_at),
+        context_remaining: None,
         archived: false,
         path: Some(path.to_string_lossy().into_owned()),
     }))

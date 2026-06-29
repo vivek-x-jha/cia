@@ -1,5 +1,7 @@
 use std::{
+    fs,
     io::{BufRead, BufReader, Write},
+    path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
@@ -7,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::agent::{Message, Thread};
+use crate::agent::{ContextRemaining, Message, Thread};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +80,10 @@ impl Client {
                 .context("Codex returned an incompatible thread/list response")?;
             threads.extend(page.data.into_iter().map(|mut thread| {
                 thread.archived = archived;
+                thread.context_remaining = thread
+                    .path
+                    .as_deref()
+                    .and_then(|path| read_context_remaining(Path::new(path)).ok().flatten());
                 thread
             }));
             cursor = page.next_cursor;
@@ -155,6 +161,38 @@ impl Drop for Client {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn read_context_remaining(path: &Path) -> Result<Option<ContextRemaining>> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("failed to read Codex session {}", path.display()))?;
+    let mut context_window = None;
+    let mut used_tokens = None;
+    for line in source.lines().filter(|line| !line.trim().is_empty()) {
+        let record: Value = serde_json::from_str(line)
+            .with_context(|| format!("invalid Codex session JSON in {}", path.display()))?;
+        if let Some(window) = record
+            .pointer("/payload/info/model_context_window")
+            .or_else(|| record.pointer("/payload/model_context_window"))
+            .and_then(Value::as_u64)
+        {
+            context_window = Some(window);
+        }
+        if let Some(tokens) = record
+            .pointer("/payload/info/total_token_usage/total_tokens")
+            .or_else(|| record.pointer("/payload/info/last_token_usage/total_tokens"))
+            .and_then(Value::as_u64)
+        {
+            used_tokens = Some(tokens);
+        }
+    }
+    Ok(match (used_tokens, context_window) {
+        (Some(used_tokens), Some(max_tokens)) => Some(ContextRemaining {
+            used_tokens,
+            max_tokens,
+        }),
+        _ => None,
+    })
 }
 
 fn extract_messages(result: &Value, turn_limit: usize) -> Vec<Message> {

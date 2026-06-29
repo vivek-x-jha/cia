@@ -1411,6 +1411,14 @@ fn preview_content(app: &App, theme: ResolvedTheme) -> (Text<'static>, Text<'sta
                     new_chat_harness_color(&thread.harness_id, theme),
                     theme,
                 ));
+                if let Some(context) = &thread.context_remaining {
+                    header.push_line(metadata_line(
+                        "Context Remaining",
+                        format_context_remaining(context),
+                        theme.preview_metadata_context,
+                        theme,
+                    ));
+                }
                 header.push_line(metadata_line(
                     "Created",
                     format_timestamp(thread.created_at),
@@ -1829,6 +1837,7 @@ struct ResolvedTheme {
     preview_text: Color,
     preview_metadata_key: Color,
     preview_metadata_thread: Color,
+    preview_metadata_context: Color,
     preview_metadata_date: Color,
     preview_metadata_path: Color,
     new_chat_unfocused: Color,
@@ -1874,6 +1883,7 @@ impl From<&ThemeConfig> for ResolvedTheme {
             preview_text: color(&value.preview_text),
             preview_metadata_key: color(&value.preview_metadata_key),
             preview_metadata_thread: color(&value.preview_metadata_thread),
+            preview_metadata_context: color(&value.preview_metadata_context),
             preview_metadata_date: color(&value.preview_metadata_date),
             preview_metadata_path: color(&value.preview_metadata_path),
             new_chat_unfocused: color(&value.new_chat_unfocused),
@@ -2305,6 +2315,23 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
+fn format_context_remaining(context: &crate::agent::ContextRemaining) -> String {
+    format!(
+        "{}% left ({} used / {})",
+        context.percent_left(),
+        format_token_count(context.used_tokens),
+        format_token_count(context.max_tokens)
+    )
+}
+
+fn format_token_count(tokens: u64) -> String {
+    if tokens >= 1_000 {
+        format!("{}K", (tokens as f64 / 1_000.0).round() as u64)
+    } else {
+        tokens.to_string()
+    }
+}
+
 fn format_timestamp(timestamp: i64) -> String {
     time::OffsetDateTime::from_unix_timestamp(timestamp)
         .map(|date| format!("{} {:02}, {}", date.month(), date.day(), date.year()))
@@ -2364,6 +2391,7 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 recency_at: None,
+                context_remaining: None,
                 archived: false,
                 path: None,
             },
@@ -2399,6 +2427,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             recency_at: None,
+            context_remaining: None,
             archived: false,
             path: None,
         };

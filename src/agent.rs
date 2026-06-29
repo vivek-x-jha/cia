@@ -24,6 +24,8 @@ pub struct Thread {
     pub updated_at: i64,
     pub recency_at: Option<i64>,
     #[serde(default)]
+    pub context_remaining: Option<ContextRemaining>,
+    #[serde(default)]
     pub archived: bool,
     #[serde(default)]
     pub path: Option<String>,
@@ -31,6 +33,22 @@ pub struct Thread {
 
 fn default_harness_id() -> String {
     DEFAULT_HARNESS_ID.into()
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ContextRemaining {
+    pub used_tokens: u64,
+    pub max_tokens: u64,
+}
+
+impl ContextRemaining {
+    pub fn percent_left(&self) -> u64 {
+        if self.max_tokens == 0 {
+            return 0;
+        }
+        let remaining = self.max_tokens.saturating_sub(self.used_tokens);
+        ((remaining as f64 / self.max_tokens as f64) * 100.0).round() as u64
+    }
 }
 
 impl Thread {

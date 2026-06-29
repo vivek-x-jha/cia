@@ -305,6 +305,7 @@ preview_text = "#e6e6e6"
 preview_title = "$CYAN_HEX"
 preview_metadata_key = "$BLACK_HEX"
 preview_metadata_thread = "$YELLOW_HEX"
+preview_metadata_context = "$GREEN_HEX"
 preview_metadata_date = "$BRIGHTMAGENTA_HEX"
 preview_metadata_path = "$BLUE_HEX"
 new_chat_unfocused = "$BRIGHTBLACK_HEX"
@@ -373,7 +374,7 @@ using the defaults above.
 | `theme.preview_codex`, `theme.preview_pi` | Legacy preview role colors retained for configuration compatibility; harness role icons use the `theme.new_chat_*` harness colors |
 | `theme.preview_text` | User and harness message text color in the preview pane |
 | `theme.preview_title` | Legacy preview title color retained for configuration compatibility |
-| `theme.preview_metadata_key`, `theme.preview_metadata_thread`, `theme.preview_metadata_date`, `theme.preview_metadata_path` | Preview metadata key/value colors; defaults are `$BLACK_HEX`, `$YELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, and `$BLUE_HEX`. Harness metadata values use the configured harness icon and `theme.new_chat_*` harness color |
+| `theme.preview_metadata_key`, `theme.preview_metadata_thread`, `theme.preview_metadata_context`, `theme.preview_metadata_date`, `theme.preview_metadata_path` | Preview metadata key/value colors; defaults are `$BLACK_HEX`, `$YELLOW_HEX`, `$GREEN_HEX`, `$BRIGHTMAGENTA_HEX`, and `$BLUE_HEX`. Harness metadata values use the configured harness icon and `theme.new_chat_*` harness color. Context remaining is shown when the harness provides token usage and context-window metadata |
 | `theme.new_chat_unfocused` | New-chat harness picker foreground color for unfocused choices; default `$BRIGHTBLACK_HEX` |
 | `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | Harness icon and new-chat picker foreground colors; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, `$BLACK_HEX`, and `$WHITE_HEX` |
 | `theme.new_chat_path`, `theme.new_chat_executable` | Focused CLI path colors in the new-chat harness picker; defaults use `$BLUE_HEX` for the path and `$BRIGHTGREEN_HEX` for the executable name |
