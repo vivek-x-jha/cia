@@ -631,7 +631,18 @@ impl App {
 
     fn delete_chat(&mut self, thread: &Thread) -> Result<()> {
         self.delete_chat_files(thread)?;
+        self.kill_deleted_chat_agent_panes(thread)?;
         self.state.save(&self.state_path)
+    }
+
+    fn kill_deleted_chat_agent_panes(&mut self, thread: &Thread) -> Result<()> {
+        let windows = self.tmux.inventory()?;
+        for window in windows.iter().filter(|window| {
+            deleted_chat_agent_pane_matches(window, thread, &self.config.tmux.agent_window_names)
+        }) {
+            self.tmux.kill_pane(&window.pane_id)?;
+        }
+        Ok(())
     }
 
     fn delete_chat_files(&mut self, thread: &Thread) -> Result<()> {
@@ -2100,6 +2111,30 @@ fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Optio
     (index < harnesses.len()).then_some(index)
 }
 
+fn deleted_chat_agent_pane_matches(
+    window: &Window,
+    thread: &Thread,
+    agent_window_names: &[String],
+) -> bool {
+    if !agent_window_names
+        .iter()
+        .any(|name| name == &window.window_name)
+        || crate::tmux::normalized_path(&window.cwd) != crate::tmux::normalized_path(&thread.cwd)
+        || window.harness_id.as_deref() != Some(thread.harness_id.as_str())
+    {
+        return false;
+    }
+
+    if window.thread_id.as_deref() == Some(thread.id.as_str()) {
+        return true;
+    }
+
+    let Some(chat_title) = window.chat_title.as_deref() else {
+        return false;
+    };
+    chat_title == thread.title() || thread.name.as_deref() == Some(chat_title)
+}
+
 fn delete_choices(target: &DeleteTarget) -> &'static [DeleteChoice] {
     match target {
         DeleteTarget::Project { .. } => {
@@ -2242,5 +2277,58 @@ mod tests {
         );
         assert_eq!(delete_choice_at(18, 9, popup, &project), None);
         assert_eq!(delete_choice_at(13, 8, popup, &project), None);
+    }
+
+    #[test]
+    fn matches_deleted_chat_agent_panes_by_thread_or_name() {
+        let thread = Thread {
+            harness_id: "codex".into(),
+            id: "thread-1".into(),
+            name: Some("Fix bug".into()),
+            preview: String::new(),
+            cwd: "/tmp/repo".into(),
+            created_at: 0,
+            updated_at: 0,
+            recency_at: None,
+            source: serde_json::Value::Null,
+            git_info: None,
+            archived: false,
+            path: None,
+        };
+        let agent_window_names = vec!["agents".to_owned()];
+        let mut window = Window {
+            session: "repo".into(),
+            session_last_attached: 0,
+            window_id: "@1".into(),
+            window_name: "agents".into(),
+            pane_id: "%1".into(),
+            pane_pid: 1,
+            command: "codex".into(),
+            cwd: "/tmp/repo".into(),
+            harness_id: Some("codex".into()),
+            thread_id: Some("thread-1".into()),
+            chat_title: None,
+        };
+
+        assert!(deleted_chat_agent_pane_matches(
+            &window,
+            &thread,
+            &agent_window_names
+        ));
+
+        window.thread_id = None;
+        window.chat_title = Some("Fix bug".into());
+        assert!(deleted_chat_agent_pane_matches(
+            &window,
+            &thread,
+            &agent_window_names
+        ));
+
+        window.window_name = "other".into();
+        assert!(!deleted_chat_agent_pane_matches(
+            &window,
+            &thread,
+            &agent_window_names
+        ));
     }
 }

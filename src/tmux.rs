@@ -253,6 +253,10 @@ impl Client {
         self.run(&["send-keys", "-t", pane_id, "Enter"])
     }
 
+    pub fn kill_pane(&self, pane_id: &str) -> Result<()> {
+        self.run(&["kill-pane", "-t", pane_id])
+    }
+
     pub fn switch_to(&self, window: &Window) -> Result<()> {
         if env::var_os("TMUX").is_some() {
             self.run(&["switch-client", "-t", &window.session])?;

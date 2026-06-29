@@ -4,7 +4,7 @@
 <h3>Your agent chats, live panes, and projects in one tmux-native dashboard.</h3>
 
 <p>
-  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.3.0-eccef0?style=flat-square"></a>
+  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.3.1-eccef0?style=flat-square"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/built_with-Rust-ea6962?style=flat-square&logo=rust"></a>
   <a href="https://ratatui.rs/"><img alt="Ratatui" src="https://img.shields.io/badge/UI-Ratatui-a9b665?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-7daea3?style=flat-square"></a>
@@ -126,7 +126,7 @@ Reload tmux, then open CIA with `prefix + g`.
 | `a` | Toggle between unarchived chats and all chats |
 | `A` | Archive the selected saved chat |
 | `U` | Unarchive the selected saved chat |
-| `D` | Hide or delete the focused project folder, or delete the selected chat history file(s) |
+| `D` | Hide or delete the focused project folder, or delete the selected chat history file(s) and matching live tmux pane |
 | `r` | Refresh agent and tmux state |
 | `?` | Toggle help |
 | `q`, `Esc` | Close CIA |
@@ -388,7 +388,7 @@ needed. A bare project name (no path separators) is created under
 `$XDG_STATE_HOME/cia/<name>` (or `~/.local/state/cia/<name>` when
 `XDG_STATE_HOME` is unset). For projects, `D` offers both Hide (remove from
 CIA's project view only) and Delete (remove the project directory from disk).
-Chat delete removes the selected chat's known on-disk history file(s) directly.
+Chat delete removes the selected chat's known on-disk history file(s) directly and kills any matching live pane in an agent window.
 
 ## Architecture
 
