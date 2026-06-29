@@ -29,6 +29,8 @@ pub struct State {
     pub mappings: Vec<Mapping>,
     #[serde(default)]
     pub archived_threads: Vec<ArchivedThread>,
+    #[serde(default)]
+    pub project_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,6 +47,7 @@ impl Default for State {
             last_project: None,
             mappings: Vec::new(),
             archived_threads: Vec::new(),
+            project_paths: Vec::new(),
         }
     }
 }
@@ -109,6 +112,16 @@ impl State {
                 thread_id: thread_id.into(),
             });
         }
+    }
+
+    pub fn add_project_path(&mut self, cwd: String) {
+        if !self.project_paths.iter().any(|path| path == &cwd) {
+            self.project_paths.push(cwd);
+        }
+    }
+
+    pub fn remove_project_path(&mut self, cwd: &str) {
+        self.project_paths.retain(|path| path != cwd);
     }
 
     pub fn record(&mut self, harness_id: &str, thread_id: &str, window: &Window) {

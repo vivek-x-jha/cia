@@ -4,7 +4,7 @@
 <h3>Your Codex and Pi chats, live agents, and projects in one tmux-native dashboard.</h3>
 
 <p>
-  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v0.3.0-eccef0?style=flat-square"></a>
+  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v0.4.0-eccef0?style=flat-square"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/built_with-Rust-ea6962?style=flat-square&logo=rust"></a>
   <a href="https://ratatui.rs/"><img alt="Ratatui" src="https://img.shields.io/badge/UI-Ratatui-a9b665?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-7daea3?style=flat-square"></a>
@@ -117,6 +117,7 @@ Reload tmux, then open CIA with `prefix + g`.
 | `Ctrl+d`, `Ctrl+u` | Scroll the preview down or up |
 | `gg`, `G` | Jump to the first or last selection |
 | `Enter` | Switch to a live chat or resume a saved thread |
+| `N` | Enter a path and add/create a new project in CIA |
 | `n` | Pick a harness, then name and start a new chat in the selected project |
 | `/` | Search projects and chats |
 | `a` | Toggle between unarchived chats and all chats |
@@ -133,14 +134,14 @@ Reload tmux, then open CIA with `prefix + g`.
 - Double-click a project to move focus to its chats.
 - Double-click a chat to switch to its live pane or resume it.
 - Scroll inside the TUI to move the preview.
-- Click top status bar actions for help, search, open, all/current, new,
-  archive/unarchive, and delete.
+- Click top status bar actions for help, search, open, all/current, new project,
+  new chat, archive/unarchive, and delete.
 - Click a new-chat harness option or a delete confirmation button when those
   prompts are open.
 
 The top status bar mirrors these actions with clickable text segments. The left
 side shows project/thread counts plus help and search. The right side shows open,
-all/current, new, archive/unarchive, and delete. Segment colors are configurable
+all/current, new project, new chat, archive/unarchive, and delete. Segment colors are configurable
 under `[theme]`; labels and icons are currently built in.
 
 ## How Sessions Work
@@ -298,9 +299,10 @@ Without `XDG_STATE_HOME`, this becomes `~/.local/state/cia/state.json`.
 The file contains the last selected project, CIA's tmux pane mappings, and CIA's
 local archived-chat set. Archive and unarchive only update this CIA state; `a`
 simply toggles whether those locally archived chats are included in the lists.
-Delete is destructive: project delete removes the project folder from disk and
-visible saved chat files for that project, while chat delete removes the selected
-chat's known on-disk history file(s) directly.
+`N` stores manually added project paths in CIA state and creates the directory if
+needed. Delete is destructive: project delete removes the project folder from
+disk and visible saved chat files for that project, while chat delete removes the
+selected chat's known on-disk history file(s) directly.
 
 ## Architecture
 

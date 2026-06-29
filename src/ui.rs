@@ -47,6 +47,7 @@ enum Focus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StatusAction {
     Open,
+    NewProject,
     New,
     Search,
     ToggleArchived,
@@ -120,6 +121,8 @@ pub struct App {
     show_archived: bool,
     search_mode: bool,
     query: String,
+    new_project_mode: bool,
+    new_project_path: String,
     new_chat_mode: bool,
     new_chat_picking_harness: bool,
     new_chat_harness_index: usize,
@@ -175,6 +178,8 @@ impl App {
             show_archived,
             search_mode: false,
             query: String::new(),
+            new_project_mode: false,
+            new_project_path: String::new(),
             new_chat_mode: false,
             new_chat_picking_harness: false,
             new_chat_harness_index: 0,
@@ -272,6 +277,19 @@ impl App {
             });
         }
         self.projects = build_projects(threads, windows, &self.tmux);
+        for cwd in &self.state.project_paths {
+            if !self.projects.iter().any(|project| &project.cwd == cwd) {
+                self.projects.push(Project {
+                    name: project_name(cwd),
+                    cwd: cwd.clone(),
+                    recency: 0,
+                    threads: Vec::new(),
+                    agents: Vec::new(),
+                });
+            }
+        }
+        self.projects
+            .sort_by(|a, b| b.recency.cmp(&a.recency).then_with(|| a.name.cmp(&b.name)));
         self.project_index = self
             .project_index
             .min(self.projects.len().saturating_sub(1));
@@ -479,6 +497,11 @@ impl App {
         self.tmux.switch_to(&window)
     }
 
+    fn begin_new_project(&mut self) {
+        self.new_project_path.clear();
+        self.new_project_mode = true;
+    }
+
     fn begin_new_thread(&mut self) {
         self.new_chat_name.clear();
         self.new_chat_harness_index = self
@@ -563,6 +586,7 @@ impl App {
         for thread in threads {
             self.delete_chat_files(thread)?;
         }
+        self.state.remove_project_path(cwd);
         self.state.save(&self.state_path)
     }
 
@@ -598,6 +622,7 @@ impl App {
     fn run_status_action(&mut self, action: StatusAction) {
         match action {
             StatusAction::Open => self.activate(),
+            StatusAction::NewProject => self.begin_new_project(),
             StatusAction::New => self.begin_new_thread(),
             StatusAction::Search => self.search_mode = true,
             StatusAction::ToggleArchived => self.toggle_archived(),
@@ -605,6 +630,36 @@ impl App {
             StatusAction::SetUnarchived => self.set_selected_archived(false),
             StatusAction::Delete => self.begin_delete(),
             StatusAction::Help => self.show_help = true,
+        }
+    }
+
+    fn submit_new_project(&mut self) {
+        let path = self.new_project_path.trim();
+        if path.is_empty() {
+            self.status = "Project path cannot be empty".into();
+            return;
+        }
+        let cwd = expand_user_path(path);
+        if let Err(error) = fs::create_dir_all(&cwd) {
+            self.status = format!("failed to create {}: {error}", cwd.display());
+            return;
+        }
+        let cwd = crate::tmux::normalized_path(&cwd)
+            .to_string_lossy()
+            .into_owned();
+        self.state.add_project_path(cwd.clone());
+        self.state.last_project = Some(cwd.clone());
+        if let Err(error) = self.state.save(&self.state_path) {
+            self.status = error.to_string();
+            return;
+        }
+        self.new_project_mode = false;
+        self.refresh_view();
+        if let Some(index) = self.projects.iter().position(|project| project.cwd == cwd) {
+            self.project_index = index;
+            self.row_index = 0;
+            self.focus = Focus::Projects;
+            self.load_preview();
         }
     }
 
@@ -681,6 +736,29 @@ impl App {
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => self.delete_prompt = None,
                 KeyCode::Char('y') | KeyCode::Char('Y') => self.confirm_delete(),
+                _ => {}
+            }
+            return;
+        }
+        if self.new_project_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    self.new_project_mode = false;
+                    self.new_project_path.clear();
+                }
+                KeyCode::Enter => self.submit_new_project(),
+                KeyCode::Backspace => {
+                    self.new_project_path.pop();
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.new_project_path.clear();
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && self.new_project_path.chars().count() < 240 =>
+                {
+                    self.new_project_path.push(character);
+                }
                 _ => {}
             }
             return;
@@ -788,6 +866,7 @@ impl App {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.scroll_preview(-8)
             }
+            KeyCode::Char('N') => self.begin_new_project(),
             KeyCode::Char('n') => self.begin_new_thread(),
             KeyCode::Char('G') => self.select_boundary(true),
             KeyCode::Enter => self.activate(),
@@ -815,6 +894,10 @@ impl App {
     fn handle_click(&mut self, x: u16, y: u16, areas: PaneAreas) {
         if self.delete_prompt.is_some() {
             self.handle_delete_prompt_click(x, y);
+            return;
+        }
+        if self.new_project_mode {
+            self.last_click = None;
             return;
         }
         if self.new_chat_mode {
@@ -958,6 +1041,9 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     draw_preview(frame, areas.preview, app, theme);
     if app.show_help {
         draw_help(frame, area, theme);
+    }
+    if app.new_project_mode {
+        draw_new_project_prompt(frame, area, app, theme);
     }
     if app.new_chat_mode {
         draw_new_chat_prompt(frame, area, app, theme);
@@ -1260,7 +1346,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     let popup = centered(area, 64, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a active/all\n  A archive     U unarchive  D delete\n  r refresh     q/Esc close  ? help";
+    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  N new project n new chat   / search\n  a active/all  A archive    U unarchive\n  D delete      r refresh    q/Esc close  ? help";
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))
@@ -1329,6 +1415,22 @@ fn draw_delete_prompt(
     frame.render_widget(
         Paragraph::new(text)
             .block(panel(" Confirm delete ", true, theme))
+            .style(Style::default().fg(theme.foreground)),
+        popup,
+    );
+}
+
+fn draw_new_project_prompt(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    app: &App,
+    theme: ResolvedTheme,
+) {
+    let popup = centered(area, 76, 5);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(format!(" {}█", app.new_project_path))
+            .block(panel(" New project path ", true, theme))
             .style(Style::default().fg(theme.foreground)),
         popup,
     );
@@ -1464,6 +1566,15 @@ fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(query)
 }
 
+fn project_name(cwd: &str) -> String {
+    Path::new(cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(cwd)
+        .to_owned()
+}
+
 fn display_dir_path(path: &str) -> String {
     let mut display = display_path(path);
     if !display.ends_with('/') {
@@ -1487,6 +1598,22 @@ fn display_path(path: &str) -> String {
             }
         })
         .unwrap_or_else(|| path.display().to_string())
+}
+
+fn home_dir() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn expand_user_path(path: &str) -> PathBuf {
+    if path == "~" {
+        return home_dir();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return home_dir().join(rest);
+    }
+    PathBuf::from(path)
 }
 
 fn remove_path_from_disk(path: &Path) -> Result<()> {
@@ -1646,7 +1773,8 @@ fn status_actions_right(app: &App) -> Vec<(&'static str, StatusAction)> {
     vec![
         ("󰷏 (enter)", StatusAction::Open),
         ("󰁌 (a)ll", StatusAction::ToggleArchived),
-        (" (n)ew", StatusAction::New),
+        (" (N)ew Project", StatusAction::NewProject),
+        (" (n)ew Chat", StatusAction::New),
         archive_action,
         (" (D)elete", StatusAction::Delete),
     ]
@@ -1655,6 +1783,7 @@ fn status_actions_right(app: &App) -> Vec<(&'static str, StatusAction)> {
 fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
     match action {
         StatusAction::Open => theme.status_open,
+        StatusAction::NewProject => theme.status_new,
         StatusAction::New => theme.status_new,
         StatusAction::Search => theme.status_search,
         StatusAction::ToggleArchived => theme.status_archive,
