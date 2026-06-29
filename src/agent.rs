@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::{codex, config::Config, pi};
 
@@ -24,8 +23,6 @@ pub struct Thread {
     pub created_at: i64,
     pub updated_at: i64,
     pub recency_at: Option<i64>,
-    pub source: Value,
-    pub git_info: Option<GitInfo>,
     #[serde(default)]
     pub archived: bool,
     #[serde(default)]
@@ -34,12 +31,6 @@ pub struct Thread {
 
 fn default_harness_id() -> String {
     DEFAULT_HARNESS_ID.into()
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitInfo {
-    pub branch: Option<String>,
 }
 
 impl Thread {
@@ -58,18 +49,6 @@ impl Thread {
 
     pub fn recency(&self) -> i64 {
         self.recency_at.unwrap_or(self.updated_at)
-    }
-
-    pub fn source_label(&self) -> String {
-        match &self.source {
-            Value::String(value) => value.clone(),
-            Value::Object(value) => value
-                .keys()
-                .next()
-                .cloned()
-                .unwrap_or_else(|| self.harness_id.clone()),
-            _ => self.harness_id.clone(),
-        }
     }
 
     pub fn storage_paths(&self) -> impl Iterator<Item = &str> {

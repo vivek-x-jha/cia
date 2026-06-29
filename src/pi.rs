@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::agent::{Message, Thread, PI_HARNESS_ID, PI_HARNESS_LABEL};
@@ -145,8 +145,6 @@ fn parse_thread(path: &Path) -> Result<Option<Thread>> {
         created_at: session.created_at,
         updated_at: session.updated_at,
         recency_at: Some(session.updated_at),
-        source: json!(PI_HARNESS_ID),
-        git_info: None,
         archived: false,
         path: Some(path.to_string_lossy().into_owned()),
     }))

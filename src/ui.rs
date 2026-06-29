@@ -1410,11 +1410,6 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     ),
                     status,
                 ]));
-                let branch = thread
-                    .git_info
-                    .as_ref()
-                    .and_then(|git| git.branch.as_deref())
-                    .unwrap_or("no branch");
                 text.push_line(harness_metadata_line(
                     "Harness",
                     harness
@@ -1422,18 +1417,6 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                         .unwrap_or("?"),
                     harness_label,
                     new_chat_harness_color(&thread.harness_id, theme),
-                    theme,
-                ));
-                text.push_line(metadata_line(
-                    "Source",
-                    thread.source_label(),
-                    theme.preview_metadata_source,
-                    theme,
-                ));
-                text.push_line(metadata_line(
-                    "Branch",
-                    branch,
-                    theme.preview_metadata_branch,
                     theme,
                 ));
                 text.push_line(metadata_line(
@@ -1845,8 +1828,6 @@ struct ResolvedTheme {
     preview_text: Color,
     preview_title: Color,
     preview_metadata_key: Color,
-    preview_metadata_source: Color,
-    preview_metadata_branch: Color,
     preview_metadata_date: Color,
     preview_metadata_path: Color,
     new_chat_unfocused: Color,
@@ -1892,8 +1873,6 @@ impl From<&ThemeConfig> for ResolvedTheme {
             preview_text: color(&value.preview_text),
             preview_title: color(&value.preview_title),
             preview_metadata_key: color(&value.preview_metadata_key),
-            preview_metadata_source: color(&value.preview_metadata_source),
-            preview_metadata_branch: color(&value.preview_metadata_branch),
             preview_metadata_date: color(&value.preview_metadata_date),
             preview_metadata_path: color(&value.preview_metadata_path),
             new_chat_unfocused: color(&value.new_chat_unfocused),
@@ -2371,8 +2350,6 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 recency_at: None,
-                source: serde_json::Value::Null,
-                git_info: None,
                 archived: false,
                 path: None,
             },
@@ -2408,8 +2385,6 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             recency_at: None,
-            source: serde_json::Value::Null,
-            git_info: None,
             archived: false,
             path: None,
         };
