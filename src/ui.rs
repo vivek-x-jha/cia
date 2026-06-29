@@ -30,7 +30,10 @@ use ratatui::{
 };
 
 use crate::{
-    agent::{Harness, Message, Thread, PI_HARNESS_ID},
+    agent::{
+        Harness, Message, Thread, CLAUDE_HARNESS_ID, CODEX_HARNESS_ID, CURSOR_HARNESS_ID,
+        OPENCODE_HARNESS_ID, PI_HARNESS_ID,
+    },
     config::{state_dir, state_path, Config, ThemeConfig},
     model::{build_projects, rows, Project, Row},
     state::State,
@@ -1581,13 +1584,14 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
             .iter()
             .enumerate()
             .flat_map(|(index, harness)| {
+                let harness_color = new_chat_harness_color(&harness.id, theme);
                 let style = if index == app.new_chat_harness_index {
                     Style::default()
-                        .fg(theme.foreground)
+                        .fg(harness_color)
                         .bg(theme.selected)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.muted)
+                    Style::default().fg(harness_color)
                 };
                 [
                     Span::raw(" "),
@@ -1637,6 +1641,11 @@ struct ResolvedTheme {
     preview_codex: Color,
     preview_pi: Color,
     preview_text: Color,
+    new_chat_pi: Color,
+    new_chat_claude: Color,
+    new_chat_codex: Color,
+    new_chat_cursor: Color,
+    new_chat_opencode: Color,
     selected: Color,
     success: Color,
     warning: Color,
@@ -1669,6 +1678,11 @@ impl From<&ThemeConfig> for ResolvedTheme {
             preview_codex: color(&value.preview_codex),
             preview_pi: color(&value.preview_pi),
             preview_text: color(&value.preview_text),
+            new_chat_pi: color(&value.new_chat_pi),
+            new_chat_claude: color(&value.new_chat_claude),
+            new_chat_codex: color(&value.new_chat_codex),
+            new_chat_cursor: color(&value.new_chat_cursor),
+            new_chat_opencode: color(&value.new_chat_opencode),
             selected: color(&value.selected),
             success: color(&value.success),
             warning: color(&value.warning),
@@ -1961,6 +1975,17 @@ fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
         StatusAction::SetUnarchived => theme.status_unarchive,
         StatusAction::Delete => theme.status_delete,
         StatusAction::Help => theme.status_help,
+    }
+}
+
+fn new_chat_harness_color(harness_id: &str, theme: ResolvedTheme) -> Color {
+    match harness_id {
+        PI_HARNESS_ID => theme.new_chat_pi,
+        CLAUDE_HARNESS_ID => theme.new_chat_claude,
+        CODEX_HARNESS_ID => theme.new_chat_codex,
+        CURSOR_HARNESS_ID => theme.new_chat_cursor,
+        OPENCODE_HARNESS_ID => theme.new_chat_opencode,
+        _ => theme.muted,
     }
 }
 

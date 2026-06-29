@@ -110,6 +110,11 @@ pub struct ThemeConfig {
     pub preview_codex: String,
     pub preview_pi: String,
     pub preview_text: String,
+    pub new_chat_pi: String,
+    pub new_chat_claude: String,
+    pub new_chat_codex: String,
+    pub new_chat_cursor: String,
+    pub new_chat_opencode: String,
 }
 
 impl Default for CodexConfig {
@@ -226,6 +231,11 @@ impl Default for ThemeConfig {
             preview_codex: "#00ffff".into(),
             preview_pi: "#00ffff".into(),
             preview_text: "#e6e6e6".into(),
+            new_chat_pi: "$CYAN_HEX".into(),
+            new_chat_claude: "$BRIGHTYELLOW_HEX".into(),
+            new_chat_codex: "$BLUE_HEX".into(),
+            new_chat_cursor: "$MAGENTA_HEX".into(),
+            new_chat_opencode: "$GREEN_HEX".into(),
         }
     }
 }
@@ -258,7 +268,9 @@ impl Config {
     pub fn load() -> Result<Self> {
         let path = config_path();
         if !path.exists() {
-            return Ok(Self::default());
+            let mut config = Self::default();
+            config.expand_env();
+            return Ok(config);
         }
         let source = fs::read_to_string(&path)
             .with_context(|| format!("failed to read configuration {}", path.display()))?;
@@ -339,6 +351,11 @@ impl ThemeConfig {
         self.preview_codex = expand_env_vars(&self.preview_codex);
         self.preview_pi = expand_env_vars(&self.preview_pi);
         self.preview_text = expand_env_vars(&self.preview_text);
+        self.new_chat_pi = expand_env_vars(&self.new_chat_pi);
+        self.new_chat_claude = expand_env_vars(&self.new_chat_claude);
+        self.new_chat_codex = expand_env_vars(&self.new_chat_codex);
+        self.new_chat_cursor = expand_env_vars(&self.new_chat_cursor);
+        self.new_chat_opencode = expand_env_vars(&self.new_chat_opencode);
     }
 }
 
@@ -421,6 +438,11 @@ mod tests {
         assert_eq!(cfg.theme.status_new_chat, "#9bd5a5");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
         assert_eq!(cfg.theme.preview_pi, "#00ffff");
+        assert_eq!(cfg.theme.new_chat_pi, "$CYAN_HEX");
+        assert_eq!(cfg.theme.new_chat_claude, "$BRIGHTYELLOW_HEX");
+        assert_eq!(cfg.theme.new_chat_codex, "$BLUE_HEX");
+        assert_eq!(cfg.theme.new_chat_cursor, "$MAGENTA_HEX");
+        assert_eq!(cfg.theme.new_chat_opencode, "$GREEN_HEX");
     }
 
     #[test]
