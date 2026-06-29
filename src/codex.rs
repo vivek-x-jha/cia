@@ -100,16 +100,6 @@ impl Client {
         Ok(extract_messages(&result, turns))
     }
 
-    pub(crate) fn set_archived_inner(&mut self, thread_id: &str, archived: bool) -> Result<()> {
-        let method = if archived {
-            "thread/archive"
-        } else {
-            "thread/unarchive"
-        };
-        self.request(method, json!({"threadId": thread_id}))?;
-        Ok(())
-    }
-
     pub(crate) fn delete_thread_inner(&mut self, thread_id: &str) -> Result<()> {
         match self.request("thread/delete", json!({"threadId": thread_id})) {
             Ok(_) => Ok(()),
@@ -170,10 +160,6 @@ impl crate::agent::Client for Client {
 
     fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>> {
         self.read_messages_inner(thread_id, turns)
-    }
-
-    fn set_archived(&mut self, thread_id: &str, archived: bool) -> Result<()> {
-        self.set_archived_inner(thread_id, archived)
     }
 
     fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
@@ -305,7 +291,6 @@ for line in sys.stdin:
             client.read_messages_inner("thread-1", 3).unwrap()[0].text,
             "done"
         );
-        client.set_archived_inner("thread-1", true).unwrap();
         client.delete_thread_inner("thread-1").unwrap();
     }
 }

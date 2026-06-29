@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    fs, io,
+    env, fs, io,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -19,7 +19,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
@@ -90,6 +90,7 @@ struct LastClick {
 }
 
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
+const STATUS_GAP: &str = "   ";
 
 pub struct App {
     config: Config,
@@ -209,12 +210,29 @@ impl App {
         if active_threads.is_empty() && archived_threads.is_empty() && !errors.is_empty() {
             anyhow::bail!("{}", errors.join("; "));
         }
-        let archived_thread_ids: HashSet<(String, String)> = archived_threads
+        let mut all_threads = Vec::new();
+        let mut seen_threads = HashSet::new();
+        for mut thread in active_threads.into_iter().chain(archived_threads) {
+            if !seen_threads.insert((thread.harness_id.clone(), thread.id.clone())) {
+                continue;
+            }
+            thread.archived = self.state.is_archived(&thread.harness_id, &thread.id);
+            all_threads.push(thread);
+        }
+        let threads: Vec<Thread> = all_threads
             .iter()
-            .map(|thread| (thread.harness_id.clone(), thread.id.clone()))
+            .filter(|thread| self.show_archived || !thread.archived)
+            .cloned()
             .collect();
-        let archived_thread_names: HashSet<(String, String, String)> = archived_threads
+        let archived_thread_ids: HashSet<(String, String)> = self
+            .state
+            .archived_threads
             .iter()
+            .map(|thread| (thread.harness_id.clone(), thread.thread_id.clone()))
+            .collect();
+        let archived_thread_names: HashSet<(String, String, String)> = all_threads
+            .iter()
+            .filter(|thread| thread.archived)
             .filter_map(|thread| {
                 thread.name.as_ref().map(|name| {
                     (
@@ -227,10 +245,6 @@ impl App {
                 })
             })
             .collect();
-        let mut threads = active_threads;
-        if self.show_archived {
-            threads.append(&mut archived_threads);
-        }
         let mut windows = self.tmux.inventory()?;
         self.state.reconcile(&mut windows);
         self.all_windows = windows.clone();
@@ -477,18 +491,13 @@ impl App {
             self.status = "Select a saved chat first".into();
             return;
         };
-        if thread.archived == archived {
-            self.refresh_view();
+        self.state
+            .set_archived(&thread.harness_id, &thread.id, archived);
+        if let Err(error) = self.state.save(&self.state_path) {
+            self.status = error.to_string();
             return;
         }
-        let result = self
-            .harness_mut(&thread.harness_id)
-            .context("thread belongs to an unavailable harness")
-            .and_then(|harness| harness.set_archived(&thread.id, archived));
-        match result {
-            Ok(()) => self.refresh_view(),
-            Err(error) => self.status = error.to_string(),
-        }
+        self.refresh_view();
     }
 
     fn begin_delete(&mut self) {
@@ -525,7 +534,7 @@ impl App {
         };
         let result = match prompt.target {
             DeleteTarget::Project { cwd, .. } => remove_path_from_disk(Path::new(&cwd)),
-            DeleteTarget::Chat { thread } => self.delete_chat_and_folder(&thread),
+            DeleteTarget::Chat { thread } => self.delete_chat(&thread),
         };
         match result {
             Ok(()) => {
@@ -536,11 +545,13 @@ impl App {
         }
     }
 
-    fn delete_chat_and_folder(&mut self, thread: &Thread) -> Result<()> {
+    fn delete_chat(&mut self, thread: &Thread) -> Result<()> {
         self.harness_mut(&thread.harness_id)
             .context("thread belongs to an unavailable harness")?
             .delete_thread(&thread.id)?;
-        remove_path_from_disk(Path::new(&thread.cwd))
+        self.state
+            .set_archived(&thread.harness_id, &thread.id, false);
+        self.state.save(&self.state_path)
     }
 
     fn refresh_view(&mut self) {
@@ -728,7 +739,7 @@ impl App {
             KeyCode::Char('a') => self.toggle_archived(),
             KeyCode::Char('A') => self.set_selected_archived(true),
             KeyCode::Char('U') => self.set_selected_archived(false),
-            KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => self.begin_delete(),
+            KeyCode::Char('D') => self.begin_delete(),
             KeyCode::Char('r') => self.refresh_view(),
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_next(1)
@@ -777,7 +788,9 @@ impl App {
             return;
         }
         if contains(areas.status, x, y) {
-            if let Some(action) = status_action_at(self, x.saturating_sub(areas.status.x)) {
+            if let Some(action) =
+                status_action_at(self, x.saturating_sub(areas.status.x), areas.status.width)
+            {
                 self.run_status_action(action);
             }
             self.last_click = None;
@@ -922,13 +935,6 @@ fn pane_areas(area: Rect) -> PaneAreas {
 }
 
 fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
-    let search = if app.search_mode {
-        format!(" /{}█", app.query)
-    } else if !app.query.is_empty() {
-        format!(" /{}", app.query)
-    } else {
-        String::new()
-    };
     let project_count = app.projects.len();
     let thread_count = app
         .projects
@@ -936,38 +942,48 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
         .map(|project| project.threads.len())
         .sum::<usize>();
     let count_status = format!("{project_count} projects · {thread_count} threads");
-    let mut spans = vec![
+    let mut left_spans = vec![
         Span::styled(" ", Style::default().fg(theme.muted)),
         Span::styled(
-            project_count.to_string(),
+            format!(" {project_count}"),
             Style::default().fg(theme.status_projects),
         ),
-        Span::styled(" Projects", Style::default().fg(theme.status_projects)),
-        Span::styled(" · ", Style::default().fg(theme.muted)),
+        Span::styled(STATUS_GAP, Style::default().fg(theme.muted)),
         Span::styled(
-            thread_count.to_string(),
+            format!("󰻞 {thread_count}"),
             Style::default().fg(theme.status_threads),
         ),
-        Span::styled(" threads", Style::default().fg(theme.status_threads)),
     ];
     if app.status != count_status {
-        spans.push(Span::styled(" · ", Style::default().fg(theme.muted)));
-        spans.push(Span::styled(
+        left_spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
+        left_spans.push(Span::styled(
             app.status.clone(),
             Style::default().fg(theme.error),
         ));
     }
-    spans.push(Span::styled(search, Style::default().fg(theme.warning)));
-    for (label, action) in status_actions(app) {
-        spans.push(Span::styled(" · ", Style::default().fg(theme.muted)));
-        spans.push(Span::styled(
+    for (label, action) in status_actions_left(app) {
+        left_spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
+        left_spans.push(Span::styled(
             label,
             Style::default().fg(status_color(action, theme)),
         ));
     }
-    spans.push(Span::styled(" ", Style::default().fg(theme.muted)));
-    let line = Line::from(spans);
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(Line::from(left_spans)), area);
+
+    let mut right_spans = Vec::new();
+    for (index, (label, action)) in status_actions_right(app).into_iter().enumerate() {
+        if index > 0 {
+            right_spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
+        }
+        right_spans.push(Span::styled(
+            label,
+            Style::default().fg(status_color(action, theme)),
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right),
+        area,
+    );
 }
 
 fn draw_projects(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
@@ -1186,7 +1202,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
     let popup = centered(area, 64, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a active/all\n  A archive     U unarchive  d delete\n  r refresh     q/Esc close  ? help";
+    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  n new chat    / search    a active/all\n  A archive     U unarchive  D delete\n  r refresh     q/Esc close  ? help";
     frame.render_widget(
         Paragraph::new(help)
             .block(panel(" CIA Help ", true, theme))
@@ -1206,13 +1222,22 @@ fn draw_delete_prompt(
     let (title, warning) = match &prompt.target {
         DeleteTarget::Project { name, cwd } => (
             format!("Delete project {name}?"),
-            format!("Will remove project folder {cwd} from disk."),
+            Line::from(vec![
+                Span::styled(
+                    "Will remove from disk: ",
+                    Style::default().fg(theme.foreground),
+                ),
+                Span::styled(
+                    display_dir_path(cwd),
+                    Style::default().fg(theme.status_threads),
+                ),
+            ]),
         ),
         DeleteTarget::Chat { thread } => (
             format!("Delete chat {}?", thread.title()),
-            format!(
-                "Will delete saved chat and remove {} from disk.",
-                thread.cwd
+            Line::styled(
+                "Will delete the saved chat from disk.",
+                Style::default().fg(theme.foreground),
             ),
         ),
     };
@@ -1233,8 +1258,8 @@ fn draw_delete_prompt(
         Style::default().fg(theme.muted)
     };
     let text = Text::from(vec![
-        Line::from(title),
-        Line::styled(warning, Style::default().fg(theme.warning)),
+        Line::styled(title, Style::default().fg(theme.error)),
+        warning,
         Line::from(""),
         Line::from(vec![
             Span::raw("  "),
@@ -1381,6 +1406,31 @@ fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(query)
 }
 
+fn display_dir_path(path: &str) -> String {
+    let mut display = display_path(path);
+    if !display.ends_with('/') {
+        display.push('/');
+    }
+    display
+}
+
+fn display_path(path: &str) -> String {
+    let Some(home) = env::var_os("HOME").map(PathBuf::from) else {
+        return path.to_owned();
+    };
+    let path = Path::new(path);
+    path.strip_prefix(&home)
+        .ok()
+        .map(|relative| {
+            if relative.as_os_str().is_empty() {
+                "~".to_owned()
+            } else {
+                format!("~/{}", relative.display())
+            }
+        })
+        .unwrap_or_else(|| path.display().to_string())
+}
+
 fn remove_path_from_disk(path: &Path) -> Result<()> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_dir() => {
@@ -1457,14 +1507,7 @@ fn list_index_at(y: u16, area: Rect) -> Option<usize> {
     (y >= inner_top && y < inner_bottom).then_some((y - inner_top) as usize)
 }
 
-fn status_action_at(app: &App, x: u16) -> Option<StatusAction> {
-    let search = if app.search_mode {
-        format!(" /{}█", app.query)
-    } else if !app.query.is_empty() {
-        format!(" /{}", app.query)
-    } else {
-        String::new()
-    };
+fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
     let project_count = app.projects.len();
     let thread_count = app
         .projects
@@ -1474,20 +1517,42 @@ fn status_action_at(app: &App, x: u16) -> Option<StatusAction> {
     let count_status = format!("{project_count} projects · {thread_count} threads");
     let mut offset = 0usize;
     offset += 1;
-    offset += project_count.to_string().chars().count();
-    offset += " Projects".chars().count();
-    offset += " · ".chars().count();
-    offset += thread_count.to_string().chars().count();
-    offset += " threads".chars().count();
+    offset += format!(" {project_count}").chars().count();
+    offset += STATUS_GAP.chars().count();
+    offset += format!("󰻞 {thread_count}").chars().count();
     if app.status != count_status {
-        offset += " · ".chars().count();
+        offset += STATUS_GAP.chars().count();
         offset += app.status.chars().count();
     }
-    offset += search.chars().count();
 
     let mut cursor = offset;
-    for (label, action) in status_actions(app) {
-        cursor += " · ".chars().count();
+    for (label, action) in status_actions_left(app) {
+        cursor += STATUS_GAP.chars().count();
+        let end = cursor + label.chars().count();
+        if (cursor..end).contains(&(x as usize)) {
+            return Some(action);
+        }
+        cursor = end;
+    }
+
+    let right_actions = status_actions_right(app);
+    let right_width: usize = right_actions
+        .iter()
+        .enumerate()
+        .map(|(index, (label, _))| {
+            label.chars().count()
+                + if index == 0 {
+                    0
+                } else {
+                    STATUS_GAP.chars().count()
+                }
+        })
+        .sum();
+    let mut cursor = (width as usize).saturating_sub(right_width);
+    for (index, (label, action)) in right_actions.into_iter().enumerate() {
+        if index > 0 {
+            cursor += STATUS_GAP.chars().count();
+        }
         let end = cursor + label.chars().count();
         if (cursor..end).contains(&(x as usize)) {
             return Some(action);
@@ -1497,20 +1562,35 @@ fn status_action_at(app: &App, x: u16) -> Option<StatusAction> {
     None
 }
 
-fn status_actions(app: &App) -> Vec<(&'static str, StatusAction)> {
-    let archive_action = if app.show_archived {
-        ("Unarchive (U)", StatusAction::SetUnarchived)
+fn status_actions_left(app: &App) -> Vec<(String, StatusAction)> {
+    vec![
+        ("󰧮 󰋖".into(), StatusAction::Help),
+        (status_search_label(app), StatusAction::Search),
+    ]
+}
+
+fn status_search_label(app: &App) -> String {
+    if app.search_mode {
+        format!(" {}█", app.query)
+    } else if !app.query.is_empty() {
+        format!(" {}", app.query)
     } else {
-        ("Archive (A)", StatusAction::SetArchived)
+        " /".into()
+    }
+}
+
+fn status_actions_right(app: &App) -> Vec<(&'static str, StatusAction)> {
+    let archive_action = if app.show_archived {
+        (" (U)narchive", StatusAction::SetUnarchived)
+    } else {
+        (" (A)rchive", StatusAction::SetArchived)
     };
     vec![
-        ("Search (/)", StatusAction::Search),
-        ("Open (Enter)", StatusAction::Open),
-        ("New (n)", StatusAction::New),
-        ("All (a)", StatusAction::ToggleArchived),
+        ("󰷏 (enter)", StatusAction::Open),
+        ("󰁌 (a)ll", StatusAction::ToggleArchived),
+        (" (n)ew", StatusAction::New),
         archive_action,
-        ("Delete (d)", StatusAction::Delete),
-        ("Help (?)", StatusAction::Help),
+        (" (D)elete", StatusAction::Delete),
     ]
 }
 

@@ -27,6 +27,15 @@ pub struct State {
     pub version: u32,
     pub last_project: Option<String>,
     pub mappings: Vec<Mapping>,
+    #[serde(default)]
+    pub archived_threads: Vec<ArchivedThread>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchivedThread {
+    #[serde(default = "default_harness_id")]
+    pub harness_id: String,
+    pub thread_id: String,
 }
 
 impl Default for State {
@@ -35,6 +44,7 @@ impl Default for State {
             version: 1,
             last_project: None,
             mappings: Vec::new(),
+            archived_threads: Vec::new(),
         }
     }
 }
@@ -81,6 +91,23 @@ impl State {
                     window.thread_id = Some(mapping.thread_id.clone());
                 }
             }
+        }
+    }
+
+    pub fn is_archived(&self, harness_id: &str, thread_id: &str) -> bool {
+        self.archived_threads
+            .iter()
+            .any(|thread| thread.harness_id == harness_id && thread.thread_id == thread_id)
+    }
+
+    pub fn set_archived(&mut self, harness_id: &str, thread_id: &str, archived: bool) {
+        self.archived_threads
+            .retain(|thread| !(thread.harness_id == harness_id && thread.thread_id == thread_id));
+        if archived {
+            self.archived_threads.push(ArchivedThread {
+                harness_id: harness_id.into(),
+                thread_id: thread_id.into(),
+            });
         }
     }
 

@@ -122,10 +122,15 @@ Reload tmux, then open CIA with `prefix + g`.
 | `a` | Toggle between unarchived chats and all chats |
 | `A` | Archive the selected saved chat |
 | `U` | Unarchive the selected saved chat |
-| `d` | Prompt to delete the focused project folder, or the selected saved chat and chat folder |
+| `D` | Prompt to delete the focused project folder, or the selected saved chat record |
 | `r` | Refresh agent and tmux state |
 | `?` | Toggle help |
 | `q`, `Esc` | Close CIA |
+
+The top status bar mirrors these actions with clickable text segments. The left
+side shows project/thread counts plus help and search. The right side shows open,
+all/current, new, archive/unarchive, and delete. Segment colors are configurable
+under `[theme]`; labels and icons are currently built in.
 
 ## How Sessions Work
 
@@ -261,8 +266,8 @@ care about; unset theme keys continue using the defaults above.
 | `ui.archived_default` | Show all chats, including archived chats, when CIA starts |
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
 | `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
-| `theme.status_projects`, `theme.status_threads` | Project/thread count and label colors in the top status bar |
-| `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Action segment colors in the top status bar |
+| `theme.status_projects`, `theme.status_threads` | Project/thread count colors in the top status bar |
+| `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Clickable action segment colors in the top status bar |
 | `theme.preview_user`, `theme.preview_codex`, `theme.preview_pi` | Role label colors in the preview pane |
 | `theme.preview_text` | User and harness message text color in the preview pane |
 
@@ -276,10 +281,10 @@ $XDG_STATE_HOME/cia/state.json
 
 Without `XDG_STATE_HOME`, this becomes `~/.local/state/cia/state.json`.
 
-The file contains the last selected project and CIA's tmux pane mappings. Each
-mapping records a harness id plus the harness-native thread id. CIA does not
-modify transcripts during normal browsing. Archive, unarchive, and delete
-actions intentionally update the selected saved chat via the backing harness.
+The file contains the last selected project, CIA's tmux pane mappings, and CIA's
+local archived-chat set. Archive and unarchive only update this CIA state. Delete
+is destructive: project delete removes the project folder from disk, while chat
+delete asks the backing harness to remove the saved chat record.
 
 ## Architecture
 

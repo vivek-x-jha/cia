@@ -59,27 +59,6 @@ impl crate::agent::Client for Client {
         Ok(Vec::new())
     }
 
-    fn set_archived(&mut self, thread_id: &str, archived: bool) -> Result<()> {
-        let Some(path) = find_session_path(&self.session_dir, thread_id)? else {
-            anyhow::bail!("Pi session not found for {thread_id}");
-        };
-        if is_archived_path(&self.session_dir, &path) == archived {
-            return Ok(());
-        }
-        let target_dir = if archived {
-            self.session_dir.join("archived")
-        } else {
-            self.session_dir.clone()
-        };
-        fs::create_dir_all(&target_dir)?;
-        let target = target_dir.join(
-            path.file_name()
-                .context("Pi session path has no file name")?,
-        );
-        fs::rename(&path, target)?;
-        Ok(())
-    }
-
     fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
         let Some(path) = find_session_path(&self.session_dir, thread_id)? else {
             return Ok(());
