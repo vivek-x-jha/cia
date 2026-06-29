@@ -124,6 +124,7 @@ pub struct App {
     new_chat_mode: bool,
     new_chat_picking_harness: bool,
     new_chat_harness_index: usize,
+    new_chat_harness_error: Option<String>,
     new_chat_name: String,
     preview: Vec<Message>,
     preview_scroll: u16,
@@ -181,6 +182,7 @@ impl App {
             new_chat_mode: false,
             new_chat_picking_harness: false,
             new_chat_harness_index: 0,
+            new_chat_harness_error: None,
             new_chat_name: String::new(),
             preview: Vec::new(),
             preview_scroll: 0,
@@ -479,8 +481,14 @@ impl App {
     fn open_thread(&mut self, thread: &Thread) -> Result<()> {
         let (harness_id, harness_command) = self
             .harness(&thread.harness_id)
-            .map(|harness| (harness.id.clone(), harness.command.clone()))
-            .context("thread belongs to an unavailable harness")?;
+            .map(|harness| {
+                if harness.command_available() {
+                    Ok((harness.id.clone(), harness.command.clone()))
+                } else {
+                    Err(anyhow::anyhow!(harness.missing_cli_message()))
+                }
+            })
+            .context("thread belongs to an unavailable harness")??;
         let window = self.tmux.open_agent(AgentLaunch {
             inventory: &self.all_windows,
             cwd: &thread.cwd,
@@ -504,6 +512,7 @@ impl App {
 
     fn begin_new_thread(&mut self) {
         self.new_chat_name.clear();
+        self.new_chat_harness_error = None;
         self.new_chat_harness_index = self
             .harnesses
             .iter()
@@ -519,6 +528,30 @@ impl App {
             self.status = error.to_string();
         }
         self.load_preview();
+    }
+
+    fn select_new_chat_harness(&mut self) {
+        let Some(harness) = self.harnesses.get(self.new_chat_harness_index) else {
+            self.new_chat_harness_error = Some("Selected harness is unavailable".into());
+            return;
+        };
+        if harness.command_available() {
+            self.new_chat_harness_error = None;
+            self.new_chat_picking_harness = false;
+        } else {
+            self.new_chat_harness_error = Some(harness.missing_cli_message());
+        }
+    }
+
+    fn move_new_chat_harness(&mut self, delta: isize) {
+        self.new_chat_harness_index =
+            move_index(self.new_chat_harness_index, self.harnesses.len(), delta);
+        self.new_chat_harness_error = None;
+    }
+
+    fn set_new_chat_harness_index(&mut self, index: usize) {
+        self.new_chat_harness_index = index;
+        self.select_new_chat_harness();
     }
 
     fn set_selected_archived(&mut self, archived: bool) {
@@ -678,14 +711,16 @@ impl App {
             self.status = "Chat name cannot be empty".into();
             return;
         }
-        let Some((harness_id, harness_command)) = self
-            .harnesses
-            .get(self.new_chat_harness_index)
-            .map(|harness| (harness.id.clone(), harness.command.clone()))
-        else {
+        let Some(harness) = self.harnesses.get(self.new_chat_harness_index) else {
             self.status = "Selected harness is unavailable".into();
             return;
         };
+        if !harness.command_available() {
+            self.new_chat_harness_error = Some(harness.missing_cli_message());
+            self.new_chat_picking_harness = true;
+            return;
+        }
+        let (harness_id, harness_command) = (harness.id.clone(), harness.command.clone());
         if project
             .threads
             .iter()
@@ -781,16 +816,21 @@ impl App {
                     KeyCode::Esc => {
                         self.new_chat_mode = false;
                         self.new_chat_picking_harness = false;
+                        self.new_chat_harness_error = None;
                         self.new_chat_name.clear();
                     }
-                    KeyCode::Enter => self.new_chat_picking_harness = false,
+                    KeyCode::Enter => self.select_new_chat_harness(),
                     KeyCode::Left | KeyCode::Char('h') | KeyCode::Up | KeyCode::Char('k') => {
-                        self.new_chat_harness_index =
-                            move_index(self.new_chat_harness_index, self.harnesses.len(), -1);
+                        self.move_new_chat_harness(-1);
                     }
                     KeyCode::Right | KeyCode::Char('l') | KeyCode::Down | KeyCode::Char('j') => {
-                        self.new_chat_harness_index =
-                            move_index(self.new_chat_harness_index, self.harnesses.len(), 1);
+                        self.move_new_chat_harness(1);
+                    }
+                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.move_new_chat_harness(1);
+                    }
+                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.move_new_chat_harness(-1);
                     }
                     _ => {}
                 }
@@ -800,6 +840,7 @@ impl App {
                 KeyCode::Esc => {
                     self.new_chat_mode = false;
                     self.new_chat_picking_harness = false;
+                    self.new_chat_harness_error = None;
                     self.new_chat_name.clear();
                 }
                 KeyCode::Enter => self.submit_new_thread(),
@@ -998,14 +1039,21 @@ impl App {
         let Ok((width, height)) = terminal_size() else {
             return;
         };
-        let popup = centered(Rect::new(0, 0, width, height), 60, 5);
+        let popup = if self.new_chat_picking_harness {
+            centered(
+                Rect::new(0, 0, width, height),
+                96,
+                self.harnesses.len() as u16 + 4,
+            )
+        } else {
+            centered(Rect::new(0, 0, width, height), 84, 5)
+        };
         if !contains(popup, x, y) {
             return;
         }
         if self.new_chat_picking_harness {
             if let Some(index) = harness_index_at(x, y, popup, &self.harnesses) {
-                self.new_chat_harness_index = index;
-                self.new_chat_picking_harness = false;
+                self.set_new_chat_harness_index(index);
             }
         }
     }
@@ -1599,7 +1647,7 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                     .command_path
                     .as_deref()
                     .map(display_path)
-                    .unwrap_or_else(|| harness.command.clone());
+                    .unwrap_or_else(|| "-".into());
                 let (path_prefix, executable) = split_executable_path(&command_path);
                 let path_style = if index == app.new_chat_harness_index {
                     Style::default().fg(theme.new_chat_path).bg(theme.selected)
@@ -1623,9 +1671,23 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                 ])
             })
             .collect::<Vec<_>>();
+        let block = if let Some(error) = &app.new_chat_harness_error {
+            Block::default()
+                .title(format!(" {error} "))
+                .title_style(
+                    Style::default()
+                        .fg(theme.error)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.error))
+                .style(Style::default().fg(theme.foreground))
+        } else {
+            panel(" Select Harness ", true, theme)
+        };
         frame.render_widget(
             Paragraph::new(Text::from(lines))
-                .block(panel(" Select Harness ", true, theme))
+                .block(block)
                 .style(Style::default().fg(theme.foreground)),
             popup,
         );

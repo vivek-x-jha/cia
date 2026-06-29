@@ -254,7 +254,7 @@ label = "Cursor"
 
 [opencode]
 command = "opencode"
-icon = "󰘦"
+icon = ""
 label = "OpenCode"
 # enabled = true
 
@@ -277,7 +277,7 @@ accent = "#a8c7fa"
 selected = "#30364a"
 success = "#9bd5a5"
 warning = "#e5c07b"
-error = "#e06c75"
+error = "$BRIGHTRED_HEX"
 title_focused = "#d2fd9d"
 title_unfocused = "#5c617d"
 border_focused = "#000000"
@@ -303,8 +303,8 @@ new_chat_unfocused = "$BRIGHTBLACK_HEX"
 new_chat_pi = "$MAGENTA_HEX"
 new_chat_claude = "$BRIGHTYELLOW_HEX"
 new_chat_codex = "$BRIGHTMAGENTA_HEX"
-new_chat_cursor = "$MAGENTA_HEX"
-new_chat_opencode = "$GREEN_HEX"
+new_chat_cursor = "$BLACK_HEX"
+new_chat_opencode = "$WHITE_HEX"
 new_chat_path = "$BLUE_HEX"
 new_chat_executable = "$BRIGHTGREEN_HEX"
 ```
@@ -316,7 +316,7 @@ icon values are plain strings, so you can replace them with ASCII if your
 terminal font lacks a glyph. Harness labels are plain strings too, so the
 new-chat text segments are customizable from config. The new-chat harness picker
 is vertical and includes a CLI path column resolved with `command -v` for each
-available harness. This includes `ui.archive_icon`, the glyph shown beside archived chats. You can override only
+harness; missing CLI tools display `-` and selecting them shows a not-found error. This includes `ui.archive_icon`, the glyph shown beside archived chats. You can override only
 the colors, icons, labels, and commands you care about; unset keys continue
 using the defaults above.
 
@@ -331,21 +331,21 @@ using the defaults above.
 | `pi.command` | Pi executable or wrapper used for Pi chats; default `pi` |
 | `pi.icon` | Icon shown in new-chat harness picker and previews; default `π` |
 | `pi.label` | Label shown in harness text segments; default `Pi` |
-| New-chat harness order | Harness text segments are shown as Pi, Claude Code, Codex, Cursor, OpenCode when those harnesses are available |
+| New-chat harness order | Harness text segments are shown as Pi, Claude Code, Codex, Cursor, OpenCode unless explicitly disabled |
 | `pi.session_dir` | Optional override for Pi session lookup; defaults to `$PI_CODING_AGENT_SESSION_DIR`, then `$PI_CODING_AGENT_DIR/sessions`, then `~/.pi/agent/sessions` |
-| `pi.enabled` | Optional explicit Pi enable/disable; by default Pi is enabled when `pi` resolves through the zsh environment |
+| `pi.enabled` | Optional explicit Pi enable/disable; by default Pi is shown even when `pi` is missing from `$PATH` |
 | `claude.command` | Claude Code executable or wrapper used for launch-only panes; default `claude` |
 | `claude.icon` | Icon shown in the new-chat harness picker; default `` |
 | `claude.label` | Label shown in harness text segments; default `Claude Code` |
-| `claude.enabled` | Optional explicit Claude Code enable/disable; by default enabled when `claude.command` resolves through the zsh environment |
+| `claude.enabled` | Optional explicit Claude Code enable/disable; by default shown even when `claude.command` is missing from `$PATH` |
 | `cursor.command` | Cursor executable or wrapper used for launch-only panes; default `cursor` |
 | `cursor.icon` | Icon shown in the new-chat harness picker; default `󰋙` |
 | `cursor.label` | Label shown in harness text segments; default `Cursor` |
-| `cursor.enabled` | Optional explicit Cursor enable/disable; by default enabled when `cursor.command` resolves through the zsh environment |
+| `cursor.enabled` | Optional explicit Cursor enable/disable; by default shown even when `cursor.command` is missing from `$PATH` |
 | `opencode.command` | OpenCode executable or wrapper used for launch-only panes; default `opencode` |
-| `opencode.icon` | Icon shown in the new-chat harness picker; default `󰘦` |
+| `opencode.icon` | Icon shown in the new-chat harness picker; default `` |
 | `opencode.label` | Label shown in harness text segments; default `OpenCode` |
-| `opencode.enabled` | Optional explicit OpenCode enable/disable; by default enabled when `opencode.command` resolves through the zsh environment |
+| `opencode.enabled` | Optional explicit OpenCode enable/disable; by default shown even when `opencode.command` is missing from `$PATH` |
 | `tmux.command` | tmux executable or wrapper |
 | `tmux.agent_commands` | Process names treated as live agent panes; default `["pi", "claude", "codex", "cursor", "opencode"]` |
 | `tmux.agent_window_names` | Candidate managed-window names; the first name is used for new and resumed chats |
@@ -353,7 +353,7 @@ using the defaults above.
 | `ui.archived_default` | Show all chats, including archived chats, when CIA starts |
 | `ui.archive_icon` | Icon shown beside archived chats in all-chats view; default `` |
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
-| `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
+| `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors; status errors use `theme.error`, default `$BRIGHTRED_HEX` |
 | `theme.title_focused`, `theme.title_unfocused` | Focused and unfocused pane title colors; defaults match tmux bright green (`#d2fd9d`) and bright black (`#5c617d`) |
 | `theme.border_focused`, `theme.border_unfocused` | Focused and unfocused pane border colors; defaults are black (`#000000`) and bright black (`#5c617d`) |
 | `theme.status_projects`, `theme.status_threads` | Project/thread count colors in the top status bar |
@@ -364,7 +364,7 @@ using the defaults above.
 | `theme.preview_text` | User and harness message text color in the preview pane |
 | `theme.preview_title` | Selected chat title color at the top of the preview pane; default `$CYAN_HEX` |
 | `theme.new_chat_unfocused` | New-chat harness picker foreground color for unfocused choices; default `$BRIGHTBLACK_HEX` |
-| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | Harness icon and new-chat picker foreground colors; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
+| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | Harness icon and new-chat picker foreground colors; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, `$BLACK_HEX`, and `$WHITE_HEX` |
 | `theme.new_chat_path`, `theme.new_chat_executable` | Focused CLI path colors in the new-chat harness picker; defaults use `$BLUE_HEX` for the path and `$BRIGHTGREEN_HEX` for the executable name |
 
 ## Data and Safety

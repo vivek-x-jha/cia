@@ -170,7 +170,7 @@ impl Default for OpencodeConfig {
     fn default() -> Self {
         Self {
             command: "opencode".into(),
-            icon: "󰘦".into(),
+            icon: "".into(),
             label: "OpenCode".into(),
             enabled: None,
         }
@@ -214,7 +214,7 @@ impl Default for ThemeConfig {
             selected: "#30364a".into(),
             success: "#9bd5a5".into(),
             warning: "#e5c07b".into(),
-            error: "#e06c75".into(),
+            error: "$BRIGHTRED_HEX".into(),
             title_focused: "#d2fd9d".into(),
             title_unfocused: "#5c617d".into(),
             border_focused: "#000000".into(),
@@ -240,8 +240,8 @@ impl Default for ThemeConfig {
             new_chat_pi: "$MAGENTA_HEX".into(),
             new_chat_claude: "$BRIGHTYELLOW_HEX".into(),
             new_chat_codex: "$BRIGHTMAGENTA_HEX".into(),
-            new_chat_cursor: "$MAGENTA_HEX".into(),
-            new_chat_opencode: "$GREEN_HEX".into(),
+            new_chat_cursor: "$BLACK_HEX".into(),
+            new_chat_opencode: "$WHITE_HEX".into(),
             new_chat_path: "$BLUE_HEX".into(),
             new_chat_executable: "$BRIGHTGREEN_HEX".into(),
         }
@@ -430,7 +430,7 @@ mod tests {
         assert_eq!(cfg.cursor.icon, "󰋙");
         assert_eq!(cfg.opencode.command, "opencode");
         assert_eq!(cfg.ui.archive_icon, "");
-        assert_eq!(cfg.opencode.icon, "󰘦");
+        assert_eq!(cfg.opencode.icon, "");
         assert_eq!(
             cfg.tmux.agent_commands,
             vec!["pi", "claude", "codex", "cursor", "opencode"]
@@ -455,8 +455,8 @@ mod tests {
         assert_eq!(cfg.theme.new_chat_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_claude, "$BRIGHTYELLOW_HEX");
         assert_eq!(cfg.theme.new_chat_codex, "$BRIGHTMAGENTA_HEX");
-        assert_eq!(cfg.theme.new_chat_cursor, "$MAGENTA_HEX");
-        assert_eq!(cfg.theme.new_chat_opencode, "$GREEN_HEX");
+        assert_eq!(cfg.theme.new_chat_cursor, "$BLACK_HEX");
+        assert_eq!(cfg.theme.new_chat_opencode, "$WHITE_HEX");
         assert_eq!(cfg.theme.new_chat_path, "$BLUE_HEX");
         assert_eq!(cfg.theme.new_chat_executable, "$BRIGHTGREEN_HEX");
     }

@@ -165,6 +165,9 @@ fn open_thread_by_query(
         .context("failed to locate the CIA executable")?
         .to_string_lossy()
         .into_owned();
+    if !harness.command_available() {
+        anyhow::bail!(harness.missing_cli_message());
+    }
     let window = tmux.open_agent(tmux::AgentLaunch {
         inventory: &windows,
         cwd: &thread.cwd,
@@ -229,6 +232,17 @@ fn run_thread(
     agent_command: &str,
     session_dir: Option<&str>,
 ) -> Result<()> {
+    if agent::command_path(agent_command).is_none() {
+        let harness_name = match harness_id {
+            agent::PI_HARNESS_ID => agent::PI_HARNESS_LABEL,
+            agent::CODEX_HARNESS_ID => "Codex",
+            agent::CLAUDE_HARNESS_ID => "Claude Code",
+            agent::CURSOR_HARNESS_ID => "Cursor",
+            agent::OPENCODE_HARNESS_ID => "OpenCode",
+            _ => harness_id,
+        };
+        bail!("{harness_name} cli tool not found - check install in $PATH");
+    }
     let pane_id = std::env::var_os("TMUX_PANE").map(|value| value.to_string_lossy().into_owned());
     let tmux = tmux::Client::new(tmux_config.clone());
     let kind = match harness_id {

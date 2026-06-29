@@ -107,18 +107,10 @@ pub enum HarnessKind {
 impl Harness {
     pub fn start_all(config: &Config) -> Vec<Result<Self>> {
         let mut harnesses = Vec::new();
-        if config
-            .pi
-            .enabled
-            .unwrap_or_else(|| command_exists(&config.pi.command))
-        {
+        if config.pi.enabled.unwrap_or(true) {
             harnesses.push(Self::start_pi(config));
         }
-        if config
-            .claude
-            .enabled
-            .unwrap_or_else(|| command_exists(&config.claude.command))
-        {
+        if config.claude.enabled.unwrap_or(true) {
             harnesses.push(Ok(Self::basic(
                 CLAUDE_HARNESS_ID,
                 &config.claude.label,
@@ -127,11 +119,7 @@ impl Harness {
             )));
         }
         harnesses.push(Self::start_codex(config));
-        if config
-            .cursor
-            .enabled
-            .unwrap_or_else(|| command_exists(&config.cursor.command))
-        {
+        if config.cursor.enabled.unwrap_or(true) {
             harnesses.push(Ok(Self::basic(
                 CURSOR_HARNESS_ID,
                 &config.cursor.label,
@@ -139,11 +127,7 @@ impl Harness {
                 &config.cursor.command,
             )));
         }
-        if config
-            .opencode
-            .enabled
-            .unwrap_or_else(|| command_exists(&config.opencode.command))
-        {
+        if config.opencode.enabled.unwrap_or(true) {
             harnesses.push(Ok(Self::basic(
                 OPENCODE_HARNESS_ID,
                 &config.opencode.label,
@@ -155,13 +139,19 @@ impl Harness {
     }
 
     pub fn start_codex(config: &Config) -> Result<Self> {
+        let command_path = command_path(&config.codex.command);
+        let client: Box<dyn Client> = if command_path.is_some() {
+            Box::new(codex::Client::start(&config.codex.command)?)
+        } else {
+            Box::new(BasicClient)
+        };
         Ok(Self {
             id: CODEX_HARNESS_ID.into(),
             label: config.codex.label.clone(),
             marker: config.codex.icon.clone(),
             command: config.codex.command.clone(),
-            command_path: command_path(&config.codex.command),
-            client: Box::new(codex::Client::start(&config.codex.command)?),
+            command_path,
+            client,
         })
     }
 
@@ -198,6 +188,14 @@ impl Harness {
     pub fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>> {
         self.client.read_messages(thread_id, turns)
     }
+
+    pub fn command_available(&self) -> bool {
+        self.command_path.is_some()
+    }
+
+    pub fn missing_cli_message(&self) -> String {
+        format!("{} cli tool not found - check install in $PATH", self.label)
+    }
 }
 
 struct BasicClient;
@@ -212,11 +210,7 @@ impl Client for BasicClient {
     }
 }
 
-fn command_exists(command: &str) -> bool {
-    command_path(command).is_some()
-}
-
-fn command_path(command: &str) -> Option<String> {
+pub fn command_path(command: &str) -> Option<String> {
     let output = std::process::Command::new("zsh")
         .args([
             "-lc",
