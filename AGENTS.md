@@ -8,7 +8,7 @@ CIA is a Rust/Ratatui tmux dashboard for Codex and Pi chats. It reads agent hist
 
 Run commands through `zsh -lc` on this machine so dotfiles PATH/env are loaded.
 
-Before building or installing, run the automated checks:
+For Rust changes, run the automated checks before building or installing:
 
 ```sh
 zsh -lc 'cargo fmt --check'
@@ -16,13 +16,13 @@ zsh -lc 'cargo test'
 zsh -lc 'cargo clippy --all-targets -- -D warnings'
 ```
 
-To manually evaluate UI or backend behavior from the current working tree, run before installing:
+For UI/input/backend behavior changes, manually evaluate from the current working tree when practical before installing:
 
 ```sh
 zsh -lc 'cargo run'
 ```
 
-After successful automated checks, update the installed binary unless the user explicitly asks not to. CIA is normally exercised through the installed `cia` executable, so this verifies the local release build and makes the change visible in normal use:
+After successful automated checks, update the installed binary for Rust or user-visible behavior changes unless the user explicitly asks not to. CIA is normally exercised through the installed `cia` executable, so this verifies the local release build and makes the change visible in normal use. For docs-only, prompt-only, or instruction-only changes, do not install unless needed.
 
 ```sh
 zsh -lc 'cargo install --path .'
