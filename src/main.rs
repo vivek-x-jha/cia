@@ -33,7 +33,7 @@ enum Commands {
         /// Search archived threads instead of active threads
         #[arg(long)]
         archived: bool,
-        /// Harness to search: pi, codex, claude, opencode, or all
+        /// Harness to search: pi, claude, codex, cursor, opencode, or all
         #[arg(long, default_value = "all")]
         harness: String,
     },

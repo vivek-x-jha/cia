@@ -1201,9 +1201,10 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
                 theme.muted
             };
             let archive_marker = match row {
-                Row::Thread { thread, .. } if app.show_archived && thread.archived => {
-                    Span::styled(" ", Style::default().fg(theme.archive_icon))
-                }
+                Row::Thread { thread, .. } if app.show_archived && thread.archived => Span::styled(
+                    format!(" {}", app.config.ui.archive_icon),
+                    Style::default().fg(theme.archive_icon),
+                ),
                 _ => Span::raw(""),
             };
             ListItem::new(Line::from(vec![
@@ -1487,7 +1488,7 @@ fn draw_new_project_prompt(
 }
 
 fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
-    let popup = centered(area, 60, 5);
+    let popup = centered(area, 84, 5);
     frame.render_widget(Clear, popup);
     if app.new_chat_picking_harness {
         let spans = app
@@ -1505,7 +1506,7 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                 };
                 [
                     Span::raw(" "),
-                    Span::styled(format!(" {} {} ", harness.marker, harness.label), style),
+                    Span::styled(format!(" {}  {} ", harness.marker, harness.label), style),
                 ]
             })
             .collect::<Vec<_>>();
@@ -1866,7 +1867,7 @@ fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Optio
     let mut cursor = popup.x.saturating_add(1);
     for (index, harness) in harnesses.iter().enumerate() {
         cursor = cursor.saturating_add(1);
-        let width = (harness.marker.chars().count() + harness.label.chars().count() + 3) as u16;
+        let width = (harness.marker.chars().count() + harness.label.chars().count() + 4) as u16;
         let end = cursor.saturating_add(width);
         if x >= cursor && x < end {
             return Some(index);

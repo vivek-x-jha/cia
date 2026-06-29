@@ -4,7 +4,7 @@
 <h3>Your agent chats, live panes, and projects in one tmux-native dashboard.</h3>
 
 <p>
-  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.0.0-eccef0?style=flat-square"></a>
+  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.1.0-eccef0?style=flat-square"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/built_with-Rust-ea6962?style=flat-square&logo=rust"></a>
   <a href="https://ratatui.rs/"><img alt="Ratatui" src="https://img.shields.io/badge/UI-Ratatui-a9b665?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-7daea3?style=flat-square"></a>
@@ -17,10 +17,10 @@
 CIA is a fast terminal dashboard for people who run multiple coding-agent
 conversations across tmux projects. It reads saved Codex threads through
 `codex app-server`, reads saved Pi chats from Pi's session JSONL files, and
-switches or launches managed Codex, Pi, Claude Code, and OpenCode panes through
+switches or launches managed Codex, Pi, Claude Code, Cursor, and OpenCode panes through
 tmux.
 
-It does not replace Codex, Pi, Claude Code, OpenCode, or tmux. It connects them.
+It does not replace Codex, Pi, Claude Code, Cursor, OpenCode, or tmux. It connects them.
 
 > CIA is an independent project and is not affiliated with or endorsed by
 > OpenAI.
@@ -32,7 +32,7 @@ It does not replace Codex, Pi, Claude Code, OpenCode, or tmux. It connects them.
   resume a chat.
 - **Direct switching** to an existing live pane without starting another
   process.
-- **Named new chats** created in the selected project for Pi, Codex, Claude Code, or OpenCode.
+- **Named new chats** created in the selected project for Pi, Claude Code, Codex, Cursor, or OpenCode.
 - **One `agents` window per project**, with each managed chat in its own pane.
 - **tmux-resurrect support** that preserves the command needed to reopen a
   specific thread.
@@ -40,7 +40,7 @@ It does not replace Codex, Pi, Claude Code, OpenCode, or tmux. It connects them.
   saved thread id.
 - **Read-only history integration** through `codex app-server` and Pi session
   JSONL files; CIA never edits agent-owned history.
-- **Launch-only support** for Claude Code and OpenCode panes.
+- **Launch-only support** for Claude Code, Cursor, and OpenCode panes.
 - **Small, inspectable state** containing only CIA's pane mappings, selected
   project, hidden projects, and local archive flags.
 
@@ -49,7 +49,7 @@ It does not replace Codex, Pi, Claude Code, OpenCode, or tmux. It connects them.
 - [Codex CLI](https://developers.openai.com/codex/cli/) with `app-server`
   support
 - [Pi](https://pi.dev/) for Pi chat history and launches
-- Optional: Claude Code (`claude`) or OpenCode (`opencode`) for launch-only panes
+- Optional: Claude Code (`claude`), Cursor (`cursor`), or OpenCode (`opencode`) for launch-only panes
 - [tmux](https://github.com/tmux/tmux)
 - A true-color terminal
 - Rust and Cargo for source installation
@@ -121,7 +121,7 @@ Reload tmux, then open CIA with `prefix + g`.
 | `gg`, `G` | Jump to the first or last selection |
 | `Enter` | Switch to a live chat or resume a saved thread |
 | `N` | Enter a path or bare name and add/create a new project in CIA |
-| `n` | Pick a harness (Pi, Codex, Claude Code, OpenCode), then name and start a new chat in the selected project |
+| `n` | Pick a harness (Pi, Claude Code, Codex, Cursor, OpenCode), then name and start a new chat in the selected project |
 | `/` | Search projects and chats |
 | `a` | Toggle between unarchived chats and all chats |
 | `A` | Archive the selected saved chat |
@@ -145,7 +145,8 @@ Reload tmux, then open CIA with `prefix + g`.
 The top status bar mirrors these actions with clickable text segments. The left
 side shows project/thread counts plus help and search. The right side shows open,
 all/current, new project, new chat, archive/unarchive, and delete. Segment colors are configurable
-under `[theme]`; harness icons are configurable under each harness section.
+under `[theme]`; harness icons are configurable under each harness section. The
+new-chat harness picker is ordered Pi, Claude Code, Codex, Cursor, OpenCode.
 
 ## How Sessions Work
 
@@ -155,7 +156,7 @@ CIA merges two sources of truth:
    transcript previews.
 2. Pi session JSONL files under `$PI_CODING_AGENT_DIR/sessions` supply Pi
    saved chats and previews.
-3. Claude Code and OpenCode are launch-only harnesses: CIA can start and switch
+3. Claude Code, Cursor, and OpenCode are launch-only harnesses: CIA can start and switch
    their managed panes, but does not read saved history for them.
 4. tmux supplies live sessions, windows, panes, commands, and working
    directories.
@@ -169,7 +170,7 @@ switches directly to its pane.
 flowchart LR
     A[Codex app-server] -->|threads and previews| C[CIA]
     P[Pi session JSONL] -->|chats and previews| C
-    L[Claude Code / OpenCode] -->|launch-only panes| C
+    L[Claude Code / Cursor / OpenCode] -->|launch-only panes| C
     B[tmux inventory] -->|sessions, windows, panes| C
     C -->|switch or launch| D[project / agents / chat pane]
     C -->|CIA mappings only| E[$XDG_STATE_HOME/cia/state.json]
@@ -207,7 +208,7 @@ On restore, existing Codex and Pi chats resume by harness-native id. A
 CIA-created Codex chat can resume by its stable Codex name once Codex has
 recorded its first message; Pi chats resume through `pi --session`, plus
 `--session-dir` when `pi.session_dir` is configured. Launch-only Claude Code and
-OpenCode panes restore by restarting the configured command in the saved project
+Cursor and OpenCode panes restore by restarting the configured command in the saved project
 pane with CIA metadata intact.
 
 ## Configuration
@@ -220,38 +221,49 @@ $XDG_CONFIG_HOME/cia/config.toml
 
 Without `XDG_CONFIG_HOME`, the path defaults to `~/.config/cia/config.toml`.
 The file is optional. Every section and every key is optional; omitted values
-use the built-in defaults below.
+use built-in defaults. Values such as `$RED_HEX` in the example below are expanded from the environment when CIA loads.
 
 ```toml
 [codex]
 command = "codex"
-icon = "󰚩"
+icon = "󱙺"
+label = "Codex"
 transcript_turns = 3
 
 [pi]
 command = "pi"
 icon = "π"
+label = "Pi"
 # session_dir = "/custom/pi/sessions"
 # enabled = true
 
 [claude]
 command = "claude"
-icon = "✳"
+icon = ""
+label = "Claude Code"
+# enabled = true
+
+[cursor]
+command = "cursor"
+icon = "󰋙"
+label = "Cursor"
 # enabled = true
 
 [opencode]
 command = "opencode"
 icon = "󰘦"
+label = "OpenCode"
 # enabled = true
 
 [tmux]
 command = "tmux"
-agent_commands = ["pi", "codex", "claude", "opencode"]
+agent_commands = ["pi", "claude", "codex", "cursor", "opencode"]
 agent_window_names = ["agents"]
 new_window_prefix = "agent:"
 
 [ui]
 archived_default = false
+archive_icon = ""
 
 [theme]
 background = "#101218"
@@ -272,7 +284,7 @@ status_archive = "#e06c75"
 status_archive_action = "#e06c75"
 status_unarchive = "#c678dd"
 status_delete = "#e06c75"
-archive_icon = "#ff0000"
+archive_icon = "$RED_HEX"
 status_help = "#e5c07b"
 preview_user = "#0000ff"
 preview_codex = "#00ffff"
@@ -284,36 +296,49 @@ Unknown keys are rejected so misspellings and stale configuration fail loudly.
 String values support `$VAR` and `${VAR}` environment expansion when CIA loads
 configuration. Theme values are six-digit RGB colors after expansion. Harness
 icon values are plain strings, so you can replace them with ASCII if your
-terminal font lacks a glyph. You can override only the colors, icons, and
-commands you care about; unset keys continue using the defaults above.
+terminal font lacks a glyph. Harness labels are plain strings too, so the
+new-chat text segments are customizable from config. This includes
+`ui.archive_icon`, the glyph shown beside archived chats. You can override only
+the colors, icons, labels, and commands you care about; unset keys continue
+using the defaults above.
 
 ### Configuration reference
 
 | Key | Purpose |
 | --- | --- |
 | `codex.command` | Codex executable or wrapper used for app-server and chats; default `codex` |
-| `codex.icon` | Icon shown in new-chat harness picker and previews; default `󰚩` |
+| `codex.icon` | Icon shown in new-chat harness picker and previews; default `󱙺` |
+| `codex.label` | Label shown in harness text segments; default `Codex` |
 | `codex.transcript_turns` | Number of recent turns included in the preview |
 | `pi.command` | Pi executable or wrapper used for Pi chats; default `pi` |
 | `pi.icon` | Icon shown in new-chat harness picker and previews; default `π` |
+| `pi.label` | Label shown in harness text segments; default `Pi` |
+| New-chat harness order | Harness text segments are shown as Pi, Claude Code, Codex, Cursor, OpenCode when those harnesses are available |
 | `pi.session_dir` | Optional override for Pi session lookup; defaults to `$PI_CODING_AGENT_SESSION_DIR`, then `$PI_CODING_AGENT_DIR/sessions`, then `~/.pi/agent/sessions` |
 | `pi.enabled` | Optional explicit Pi enable/disable; by default Pi is enabled when `pi` resolves through the zsh environment |
 | `claude.command` | Claude Code executable or wrapper used for launch-only panes; default `claude` |
-| `claude.icon` | Icon shown in the new-chat harness picker; default `✳` |
+| `claude.icon` | Icon shown in the new-chat harness picker; default `` |
+| `claude.label` | Label shown in harness text segments; default `Claude Code` |
 | `claude.enabled` | Optional explicit Claude Code enable/disable; by default enabled when `claude.command` resolves through the zsh environment |
+| `cursor.command` | Cursor executable or wrapper used for launch-only panes; default `cursor` |
+| `cursor.icon` | Icon shown in the new-chat harness picker; default `󰋙` |
+| `cursor.label` | Label shown in harness text segments; default `Cursor` |
+| `cursor.enabled` | Optional explicit Cursor enable/disable; by default enabled when `cursor.command` resolves through the zsh environment |
 | `opencode.command` | OpenCode executable or wrapper used for launch-only panes; default `opencode` |
 | `opencode.icon` | Icon shown in the new-chat harness picker; default `󰘦` |
+| `opencode.label` | Label shown in harness text segments; default `OpenCode` |
 | `opencode.enabled` | Optional explicit OpenCode enable/disable; by default enabled when `opencode.command` resolves through the zsh environment |
 | `tmux.command` | tmux executable or wrapper |
-| `tmux.agent_commands` | Process names treated as live agent panes; default `["pi", "codex", "claude", "opencode"]` |
+| `tmux.agent_commands` | Process names treated as live agent panes; default `["pi", "claude", "codex", "cursor", "opencode"]` |
 | `tmux.agent_window_names` | Candidate managed-window names; the first name is used for new and resumed chats |
 | `tmux.new_window_prefix` | Legacy managed-window prefix retained for compatibility |
 | `ui.archived_default` | Show all chats, including archived chats, when CIA starts |
+| `ui.archive_icon` | Icon shown beside archived chats in all-chats view; default `` |
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
 | `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
 | `theme.status_projects`, `theme.status_threads` | Project/thread count colors in the top status bar |
 | `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Clickable action segment colors in the top status bar |
-| `theme.archive_icon` | Color for archived-chat icon in all-chats view; default red (`#ff0000`) |
+| `theme.archive_icon` | Color for archived-chat icon in all-chats view; default red (`#ff0000`); can be set to `$RED_HEX` |
 | `theme.preview_user`, `theme.preview_codex`, `theme.preview_pi` | Role label colors in the preview pane |
 | `theme.preview_text` | User and harness message text color in the preview pane |
 
@@ -344,7 +369,7 @@ The codebase is intentionally small and split by responsibility:
 
 | Module | Responsibility |
 | --- | --- |
-| `agent` | Shared harness registry and thread/message model, including launch-only Claude Code and OpenCode adapters |
+| `agent` | Shared harness registry and thread/message model, including launch-only Claude Code, Cursor, and OpenCode adapters |
 | `codex` | Codex JSONL app-server adapter, thread listing, and transcript extraction |
 | `pi` | Pi session JSONL adapter, chat listing, and transcript extraction |
 | `tmux` | Pane inventory, agent detection, launch, switching, and metadata |

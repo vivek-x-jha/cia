@@ -9,6 +9,7 @@ pub struct Config {
     pub codex: CodexConfig,
     pub pi: PiConfig,
     pub claude: ClaudeConfig,
+    pub cursor: CursorConfig,
     pub opencode: OpencodeConfig,
     pub tmux: TmuxConfig,
     pub ui: UiConfig,
@@ -20,6 +21,7 @@ pub struct Config {
 pub struct CodexConfig {
     pub command: String,
     pub icon: String,
+    pub label: String,
     pub transcript_turns: usize,
 }
 
@@ -28,6 +30,7 @@ pub struct CodexConfig {
 pub struct PiConfig {
     pub command: String,
     pub icon: String,
+    pub label: String,
     pub session_dir: Option<String>,
     pub enabled: Option<bool>,
 }
@@ -37,6 +40,16 @@ pub struct PiConfig {
 pub struct ClaudeConfig {
     pub command: String,
     pub icon: String,
+    pub label: String,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CursorConfig {
+    pub command: String,
+    pub icon: String,
+    pub label: String,
     pub enabled: Option<bool>,
 }
 
@@ -45,6 +58,7 @@ pub struct ClaudeConfig {
 pub struct OpencodeConfig {
     pub command: String,
     pub icon: String,
+    pub label: String,
     pub enabled: Option<bool>,
 }
 
@@ -57,10 +71,11 @@ pub struct TmuxConfig {
     pub new_window_prefix: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiConfig {
     pub archived_default: bool,
+    pub archive_icon: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -96,7 +111,8 @@ impl Default for CodexConfig {
     fn default() -> Self {
         Self {
             command: "codex".into(),
-            icon: "󰚩".into(),
+            icon: "󱙺".into(),
+            label: "Codex".into(),
             transcript_turns: 3,
         }
     }
@@ -107,6 +123,7 @@ impl Default for PiConfig {
         Self {
             command: "pi".into(),
             icon: "π".into(),
+            label: "Pi".into(),
             session_dir: None,
             enabled: None,
         }
@@ -117,7 +134,19 @@ impl Default for ClaudeConfig {
     fn default() -> Self {
         Self {
             command: "claude".into(),
-            icon: "✳".into(),
+            icon: "".into(),
+            label: "Claude Code".into(),
+            enabled: None,
+        }
+    }
+}
+
+impl Default for CursorConfig {
+    fn default() -> Self {
+        Self {
+            command: "cursor".into(),
+            icon: "󰋙".into(),
+            label: "Cursor".into(),
             enabled: None,
         }
     }
@@ -128,6 +157,7 @@ impl Default for OpencodeConfig {
         Self {
             command: "opencode".into(),
             icon: "󰘦".into(),
+            label: "OpenCode".into(),
             enabled: None,
         }
     }
@@ -139,12 +169,22 @@ impl Default for TmuxConfig {
             command: "tmux".into(),
             agent_commands: vec![
                 "pi".into(),
-                "codex".into(),
                 "claude".into(),
+                "codex".into(),
+                "cursor".into(),
                 "opencode".into(),
             ],
             agent_window_names: vec!["agents".into()],
             new_window_prefix: "agent:".into(),
+        }
+    }
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            archived_default: false,
+            archive_icon: "".into(),
         }
     }
 }
@@ -221,12 +261,19 @@ impl Config {
     fn expand_env(&mut self) {
         self.codex.command = expand_env_vars(&self.codex.command);
         self.codex.icon = expand_env_vars(&self.codex.icon);
+        self.codex.label = expand_env_vars(&self.codex.label);
         self.pi.command = expand_env_vars(&self.pi.command);
         self.pi.icon = expand_env_vars(&self.pi.icon);
+        self.pi.label = expand_env_vars(&self.pi.label);
         self.claude.command = expand_env_vars(&self.claude.command);
         self.claude.icon = expand_env_vars(&self.claude.icon);
+        self.claude.label = expand_env_vars(&self.claude.label);
+        self.cursor.command = expand_env_vars(&self.cursor.command);
+        self.cursor.icon = expand_env_vars(&self.cursor.icon);
+        self.cursor.label = expand_env_vars(&self.cursor.label);
         self.opencode.command = expand_env_vars(&self.opencode.command);
         self.opencode.icon = expand_env_vars(&self.opencode.icon);
+        self.opencode.label = expand_env_vars(&self.opencode.label);
         self.pi.session_dir = self
             .pi
             .session_dir
@@ -246,6 +293,7 @@ impl Config {
             .map(|value| expand_env_vars(value))
             .collect();
         self.tmux.new_window_prefix = expand_env_vars(&self.tmux.new_window_prefix);
+        self.ui.archive_icon = expand_env_vars(&self.ui.archive_icon);
         self.theme.expand_env();
     }
 }
@@ -332,12 +380,16 @@ mod tests {
         assert_eq!(cfg.codex.command, "codex");
         assert_eq!(cfg.pi.command, "pi");
         assert_eq!(cfg.claude.command, "claude");
-        assert_eq!(cfg.claude.icon, "✳");
+        assert_eq!(cfg.claude.icon, "");
+        assert_eq!(cfg.claude.label, "Claude Code");
+        assert_eq!(cfg.cursor.command, "cursor");
+        assert_eq!(cfg.cursor.icon, "󰋙");
         assert_eq!(cfg.opencode.command, "opencode");
+        assert_eq!(cfg.ui.archive_icon, "");
         assert_eq!(cfg.opencode.icon, "󰘦");
         assert_eq!(
             cfg.tmux.agent_commands,
-            vec!["pi", "codex", "claude", "opencode"]
+            vec!["pi", "claude", "codex", "cursor", "opencode"]
         );
     }
 

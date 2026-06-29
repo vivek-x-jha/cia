@@ -5,13 +5,11 @@ use serde_json::Value;
 use crate::{codex, config::Config, pi};
 
 pub const CODEX_HARNESS_ID: &str = "codex";
-pub const CODEX_HARNESS_LABEL: &str = "Codex";
 pub const PI_HARNESS_ID: &str = "pi";
 pub const PI_HARNESS_LABEL: &str = "Pi";
 pub const CLAUDE_HARNESS_ID: &str = "claude";
-pub const CLAUDE_HARNESS_LABEL: &str = "Claude Code";
+pub const CURSOR_HARNESS_ID: &str = "cursor";
 pub const OPENCODE_HARNESS_ID: &str = "opencode";
-pub const OPENCODE_HARNESS_LABEL: &str = "OpenCode";
 pub const DEFAULT_HARNESS_ID: &str = CODEX_HARNESS_ID;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -115,7 +113,6 @@ impl Harness {
         {
             harnesses.push(Self::start_pi(config));
         }
-        harnesses.push(Self::start_codex(config));
         if config
             .claude
             .enabled
@@ -123,9 +120,22 @@ impl Harness {
         {
             harnesses.push(Ok(Self::basic(
                 CLAUDE_HARNESS_ID,
-                CLAUDE_HARNESS_LABEL,
+                &config.claude.label,
                 &config.claude.icon,
                 &config.claude.command,
+            )));
+        }
+        harnesses.push(Self::start_codex(config));
+        if config
+            .cursor
+            .enabled
+            .unwrap_or_else(|| command_exists(&config.cursor.command))
+        {
+            harnesses.push(Ok(Self::basic(
+                CURSOR_HARNESS_ID,
+                &config.cursor.label,
+                &config.cursor.icon,
+                &config.cursor.command,
             )));
         }
         if config
@@ -135,7 +145,7 @@ impl Harness {
         {
             harnesses.push(Ok(Self::basic(
                 OPENCODE_HARNESS_ID,
-                OPENCODE_HARNESS_LABEL,
+                &config.opencode.label,
                 &config.opencode.icon,
                 &config.opencode.command,
             )));
@@ -146,7 +156,7 @@ impl Harness {
     pub fn start_codex(config: &Config) -> Result<Self> {
         Ok(Self {
             id: CODEX_HARNESS_ID.into(),
-            label: CODEX_HARNESS_LABEL.into(),
+            label: config.codex.label.clone(),
             marker: config.codex.icon.clone(),
             command: config.codex.command.clone(),
             client: Box::new(codex::Client::start(&config.codex.command)?),
@@ -156,7 +166,7 @@ impl Harness {
     pub fn start_pi(config: &Config) -> Result<Self> {
         Ok(Self {
             id: PI_HARNESS_ID.into(),
-            label: PI_HARNESS_LABEL.into(),
+            label: config.pi.label.clone(),
             marker: config.pi.icon.clone(),
             command: config.pi.command.clone(),
             client: Box::new(pi::Client::new(config.pi.session_dir.clone())),
