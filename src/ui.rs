@@ -1393,9 +1393,6 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
             }
             Row::Thread { thread, live } => {
                 let harness = app.harness(&thread.harness_id);
-                let harness_label = harness
-                    .map(|harness| harness.label.as_str())
-                    .unwrap_or(thread.harness_id.as_str());
                 let status = if live.is_some() {
                     Span::styled(" ● live", Style::default().fg(theme.live))
                 } else {
@@ -1415,7 +1412,6 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     harness
                         .map(|harness| harness.marker.as_str())
                         .unwrap_or("?"),
-                    harness_label,
                     new_chat_harness_color(&thread.harness_id, theme),
                     theme,
                 ));
@@ -1490,14 +1486,12 @@ fn metadata_line(
 fn harness_metadata_line(
     key: &str,
     marker: &str,
-    label: &str,
     harness_color: Color,
     theme: ResolvedTheme,
 ) -> Line<'static> {
     Line::from(vec![
         metadata_key_span(key, theme),
-        Span::styled(format!("{marker} "), Style::default().fg(harness_color)),
-        Span::styled(label.to_string(), Style::default().fg(harness_color)),
+        Span::styled(marker.to_string(), Style::default().fg(harness_color)),
     ])
 }
 
