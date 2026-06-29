@@ -1117,6 +1117,10 @@ pub fn run(mut app: App) -> Result<()> {
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = ResolvedTheme::from(&app.config.theme);
     let area = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.background)),
+        area,
+    );
     let areas = pane_areas(area);
     draw_status_bar(frame, areas.status, app, theme);
     draw_projects(frame, areas.projects, app, theme);
@@ -1195,7 +1199,8 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
             Style::default().fg(status_color(action, theme)),
         ));
     }
-    frame.render_widget(Paragraph::new(Line::from(left_spans)), area);
+    let status_style = Style::default().fg(theme.foreground).bg(theme.surface);
+    frame.render_widget(Block::default().style(status_style), area);
 
     let mut right_spans = Vec::new();
     for (index, (label, action)) in status_actions_right(app).into_iter().enumerate() {
@@ -1207,9 +1212,37 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
             Style::default().fg(status_color(action, theme)),
         ));
     }
+    let right_width = right_spans
+        .iter()
+        .map(|span| span.content.chars().count() as u16)
+        .sum::<u16>()
+        .min(area.width);
+    let right_area = Rect {
+        x: area.x + area.width.saturating_sub(right_width),
+        y: area.y,
+        width: right_width,
+        height: area.height,
+    };
     frame.render_widget(
-        Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right),
-        area,
+        Paragraph::new(Line::from(right_spans))
+            .style(status_style)
+            .alignment(Alignment::Right),
+        right_area,
+    );
+    let left_width = left_spans
+        .iter()
+        .map(|span| span.content.chars().count() as u16)
+        .sum::<u16>()
+        .min(area.width);
+    let left_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: left_width,
+        height: area.height,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(left_spans)).style(status_style),
+        left_area,
     );
 }
 
@@ -1720,6 +1753,8 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
 
 #[derive(Clone, Copy)]
 struct ResolvedTheme {
+    background: Color,
+    surface: Color,
     foreground: Color,
     muted: Color,
     accent: Color,
@@ -1759,6 +1794,8 @@ struct ResolvedTheme {
 impl From<&ThemeConfig> for ResolvedTheme {
     fn from(value: &ThemeConfig) -> Self {
         Self {
+            background: color(&value.background),
+            surface: color(&value.surface),
             foreground: color(&value.foreground),
             muted: color(&value.muted),
             accent: color(&value.accent),
@@ -1821,7 +1858,7 @@ fn panel<'a>(title: &'a str, focused: bool, theme: ResolvedTheme) -> Block<'a> {
         } else {
             theme.border_unfocused
         }))
-        .style(Style::default().fg(theme.foreground))
+        .style(Style::default().fg(theme.foreground).bg(theme.surface))
 }
 
 fn selected(theme: ResolvedTheme) -> Style {
@@ -2009,6 +2046,9 @@ fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
             return Some(action);
         }
         cursor = end;
+    }
+    if (x as usize) < cursor.min(width as usize) {
+        return None;
     }
 
     let right_actions = status_actions_right(app);

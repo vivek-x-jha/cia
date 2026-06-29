@@ -143,8 +143,9 @@ Reload tmux, then open CIA with `prefix + g`.
   prompts are open.
 
 The top status bar mirrors these actions with clickable text segments. The left
-side shows project/thread counts plus help and search. The right side shows open,
-all/current, new project, new chat, archive/unarchive, and delete. Segment colors are configurable
+side shows project/thread counts plus help and search. On narrow screens the left
+side is favored, so long search input can overwrite right-side actions. The right
+side shows open, all/current, new project, new chat, archive/unarchive, and delete. Segment colors are configurable
 under `[theme]`; harness icons are configurable under each harness section and
 are shown in the chats list, preview role labels, and new-chat picker. Harness
 icon colors in chats, previews, and the new-chat picker share the
