@@ -26,6 +26,8 @@ pub struct Thread {
     pub git_info: Option<GitInfo>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 fn default_harness_id() -> String {
@@ -67,6 +69,10 @@ impl Thread {
             _ => self.harness_id.clone(),
         }
     }
+
+    pub fn storage_paths(&self) -> impl Iterator<Item = &str> {
+        self.path.as_deref().into_iter()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,7 +84,6 @@ pub struct Message {
 pub trait Client {
     fn list_threads(&mut self, archived: bool) -> Result<Vec<Thread>>;
     fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>>;
-    fn delete_thread(&mut self, thread_id: &str) -> Result<()>;
 }
 
 pub struct Harness {
@@ -138,10 +143,6 @@ impl Harness {
 
     pub fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>> {
         self.client.read_messages(thread_id, turns)
-    }
-
-    pub fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
-        self.client.delete_thread(thread_id)
     }
 }
 

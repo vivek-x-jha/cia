@@ -131,9 +131,15 @@ pub fn rows(project: &Project) -> Vec<Row> {
         .agents
         .iter()
         .filter(|window| {
+            let has_thread_name = window
+                .chat_title
+                .as_deref()
+                .is_some_and(|title| !title.is_empty());
             window.thread_id.as_deref().map_or_else(
                 || match (window.harness_id.as_deref(), window.chat_title.as_deref()) {
-                    (Some(harness_id), Some(title)) => !thread_names.contains(&(harness_id, title)),
+                    (Some(harness_id), Some(title)) => {
+                        !thread_names.contains(&(harness_id, title)) && !has_thread_name
+                    }
                     _ => true,
                 },
                 |id| {
@@ -141,6 +147,7 @@ pub fn rows(project: &Project) -> Vec<Row> {
                         .harness_id
                         .as_deref()
                         .is_none_or(|harness_id| !thread_ids.contains(&(harness_id, id)))
+                        && !has_thread_name
                 },
             )
         })
@@ -234,5 +241,41 @@ mod tests {
         let result = rows(&projects[0]);
         assert_eq!(result.len(), 1);
         assert!(matches!(result[0], Row::Thread { live: Some(_), .. }));
+    }
+
+    #[test]
+    fn only_untitled_agents_become_unmapped_rows() {
+        let tmux = TmuxClient::new(TmuxConfig::default());
+        let titled = Window {
+            session: "repo".into(),
+            session_last_attached: 3,
+            window_id: "@1".into(),
+            window_name: "agents".into(),
+            pane_id: "%1".into(),
+            pane_pid: 1,
+            command: "cia".into(),
+            cwd: "/tmp/repo".into(),
+            harness_id: Some(crate::agent::DEFAULT_HARNESS_ID.into()),
+            thread_id: None,
+            chat_title: Some("not listed yet".into()),
+        };
+        let untitled = Window {
+            pane_id: "%2".into(),
+            chat_title: None,
+            ..titled.clone()
+        };
+        let projects = build_projects(
+            vec![thread("chat", "/tmp/repo", 2)],
+            vec![titled, untitled],
+            &tmux,
+        );
+        let result = rows(&projects[0]);
+        assert_eq!(
+            result
+                .iter()
+                .filter(|row| matches!(row, Row::Agent(_)))
+                .count(),
+            1
+        );
     }
 }

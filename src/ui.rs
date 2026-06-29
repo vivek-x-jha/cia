@@ -71,6 +71,12 @@ enum ClickTarget {
     Preview,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeleteChoice {
+    No,
+    Yes,
+}
+
 #[derive(Clone, Debug)]
 struct DeletePrompt {
     target: DeleteTarget,
@@ -79,8 +85,14 @@ struct DeletePrompt {
 
 #[derive(Clone, Debug)]
 enum DeleteTarget {
-    Project { name: String, cwd: String },
-    Chat { thread: Thread },
+    Project {
+        name: String,
+        cwd: String,
+        threads: Vec<Thread>,
+    },
+    Chat {
+        thread: Thread,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -459,6 +471,7 @@ impl App {
             thread_id: Some(&thread.id),
             cia_command: &self.cia_command,
             agent_command: &harness_command,
+            session_dir: self.pi_session_dir(&harness_id),
         })?;
         self.state.record(&harness_id, &thread.id, &window);
         self.state.last_project = Some(thread.cwd.clone());
@@ -510,6 +523,7 @@ impl App {
                 DeleteTarget::Project {
                     name: project.name.clone(),
                     cwd: project.cwd.clone(),
+                    threads: project.threads.clone(),
                 }
             }
             Focus::Threads | Focus::Preview => {
@@ -533,25 +547,45 @@ impl App {
             return;
         };
         let result = match prompt.target {
-            DeleteTarget::Project { cwd, .. } => remove_path_from_disk(Path::new(&cwd)),
+            DeleteTarget::Project { cwd, threads, .. } => self.delete_project(&cwd, &threads),
             DeleteTarget::Chat { thread } => self.delete_chat(&thread),
         };
         match result {
             Ok(()) => {
                 self.refresh_view();
-                self.status = "Deleted".into();
             }
             Err(error) => self.status = error.to_string(),
         }
     }
 
+    fn delete_project(&mut self, cwd: &str, threads: &[Thread]) -> Result<()> {
+        remove_path_from_disk(Path::new(cwd))?;
+        for thread in threads {
+            self.delete_chat_files(thread)?;
+        }
+        self.state.save(&self.state_path)
+    }
+
     fn delete_chat(&mut self, thread: &Thread) -> Result<()> {
-        self.harness_mut(&thread.harness_id)
-            .context("thread belongs to an unavailable harness")?
-            .delete_thread(&thread.id)?;
+        self.delete_chat_files(thread)?;
+        self.state.save(&self.state_path)
+    }
+
+    fn delete_chat_files(&mut self, thread: &Thread) -> Result<()> {
+        let mut removed = false;
+        for path in thread.storage_paths() {
+            remove_path_from_disk(Path::new(path))?;
+            removed = true;
+        }
+        if !removed {
+            anyhow::bail!(
+                "No on-disk chat path is known for this {} chat",
+                thread.harness_id
+            );
+        }
         self.state
             .set_archived(&thread.harness_id, &thread.id, false);
-        self.state.save(&self.state_path)
+        Ok(())
     }
 
     fn refresh_view(&mut self) {
@@ -609,6 +643,7 @@ impl App {
                 thread_id: None,
                 cia_command: &self.cia_command,
                 agent_command: &harness_command,
+                session_dir: self.pi_session_dir(&harness_id),
             })
             .and_then(|window| {
                 self.state.last_project = Some(project.cwd.clone());
@@ -778,6 +813,10 @@ impl App {
     }
 
     fn handle_click(&mut self, x: u16, y: u16, areas: PaneAreas) {
+        if self.delete_prompt.is_some() {
+            self.handle_delete_prompt_click(x, y);
+            return;
+        }
         if self.new_chat_mode {
             self.handle_new_chat_click(x, y);
             return;
@@ -835,6 +874,19 @@ impl App {
         }
     }
 
+    fn handle_delete_prompt_click(&mut self, x: u16, y: u16) {
+        let Ok((width, height)) = terminal_size() else {
+            return;
+        };
+        let popup = centered(Rect::new(0, 0, width, height), 76, 8);
+        match delete_choice_at(x, y, popup) {
+            Some(DeleteChoice::No) => self.delete_prompt = None,
+            Some(DeleteChoice::Yes) => self.confirm_delete(),
+            None => {}
+        }
+        self.last_click = None;
+    }
+
     fn handle_new_chat_click(&mut self, x: u16, y: u16) {
         let Ok((width, height)) = terminal_size() else {
             return;
@@ -858,6 +910,12 @@ impl App {
         });
         self.last_click = Some(LastClick { target, at: now });
         double_click
+    }
+
+    fn pi_session_dir(&self, harness_id: &str) -> Option<&str> {
+        (harness_id == PI_HARNESS_ID)
+            .then_some(self.config.pi.session_dir.as_deref())
+            .flatten()
     }
 }
 
@@ -1220,7 +1278,7 @@ fn draw_delete_prompt(
     let popup = centered(area, 76, 8);
     frame.render_widget(Clear, popup);
     let (title, warning) = match &prompt.target {
-        DeleteTarget::Project { name, cwd } => (
+        DeleteTarget::Project { name, cwd, .. } => (
             format!("Delete project {name}?"),
             Line::from(vec![
                 Span::styled(
@@ -1236,7 +1294,7 @@ fn draw_delete_prompt(
         DeleteTarget::Chat { thread } => (
             format!("Delete chat {}?", thread.title()),
             Line::styled(
-                "Will delete the saved chat from disk.",
+                "Will delete this chat's on-disk history file(s).",
                 Style::default().fg(theme.foreground),
             ),
         ),
@@ -1624,6 +1682,23 @@ fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Optio
     None
 }
 
+fn delete_choice_at(x: u16, y: u16, popup: Rect) -> Option<DeleteChoice> {
+    if y != popup.y.saturating_add(4) {
+        return None;
+    }
+    let no_start = popup.x.saturating_add(3);
+    let no_end = no_start.saturating_add(4);
+    if x >= no_start && x < no_end {
+        return Some(DeleteChoice::No);
+    }
+    let yes_start = popup.x.saturating_add(9);
+    let yes_end = yes_start.saturating_add(5);
+    if x >= yes_start && x < yes_end {
+        return Some(DeleteChoice::Yes);
+    }
+    None
+}
+
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
     Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
@@ -1661,5 +1736,13 @@ mod tests {
     #[test]
     fn formats_thread_dates() {
         assert_eq!(format_timestamp(0), "1970-01-01");
+    }
+    #[test]
+    fn finds_delete_prompt_mouse_choices() {
+        let popup = Rect::new(10, 5, 76, 8);
+        assert_eq!(delete_choice_at(13, 9, popup), Some(DeleteChoice::No));
+        assert_eq!(delete_choice_at(19, 9, popup), Some(DeleteChoice::Yes));
+        assert_eq!(delete_choice_at(18, 9, popup), None);
+        assert_eq!(delete_choice_at(13, 8, popup), None);
     }
 }

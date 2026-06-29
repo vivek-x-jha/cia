@@ -53,6 +53,8 @@ enum Commands {
         agent_command_hex: Option<String>,
         #[arg(long)]
         codex_command_hex: Option<String>,
+        #[arg(long)]
+        session_dir_hex: Option<String>,
     },
 }
 
@@ -74,6 +76,7 @@ fn main() -> Result<()> {
             harness_id,
             agent_command_hex,
             codex_command_hex,
+            session_dir_hex,
         }) => {
             let cwd = PathBuf::from(runner::decode(&cwd_hex, "working directory")?);
             let title = runner::decode(&title_hex, "chat title")?;
@@ -81,6 +84,10 @@ fn main() -> Result<()> {
                 .or(codex_command_hex)
                 .context("missing agent command")?;
             let agent_command = runner::decode(&command_hex, "agent command")?;
+            let session_dir = session_dir_hex
+                .as_deref()
+                .map(|value| runner::decode(value, "session directory"))
+                .transpose()?;
             return run_thread(
                 &config.tmux,
                 harness_id.as_deref().unwrap_or(agent::DEFAULT_HARNESS_ID),
@@ -88,6 +95,7 @@ fn main() -> Result<()> {
                 &cwd,
                 &title,
                 &agent_command,
+                session_dir.as_deref(),
             );
         }
         None => {}
@@ -165,6 +173,7 @@ fn open_thread_by_query(
         thread_id: Some(&thread.id),
         cia_command: &cia_command,
         agent_command: &harness.command,
+        session_dir: pi_session_dir(config, &harness.id),
     })?;
     state.record(&harness.id, &thread.id, &window);
     state.last_project = Some(thread.cwd.clone());
@@ -218,6 +227,7 @@ fn run_thread(
     cwd: &PathBuf,
     title: &str,
     agent_command: &str,
+    session_dir: Option<&str>,
 ) -> Result<()> {
     let pane_id = std::env::var_os("TMUX_PANE").map(|value| value.to_string_lossy().into_owned());
     let tmux = tmux::Client::new(tmux_config.clone());
@@ -248,23 +258,7 @@ fn run_thread(
         }
     }
     let cwd = cwd.to_string_lossy().into_owned();
-    let mut args = Vec::new();
-    match kind {
-        agent::HarnessKind::Codex => {
-            if let Some(thread_id) = resume_id {
-                args.extend(["resume".into(), thread_id.into(), "-C".into(), cwd.clone()]);
-            } else {
-                args.extend(["-C".into(), cwd.clone()]);
-            }
-        }
-        agent::HarnessKind::Pi => {
-            if let Some(thread_id) = resume_id {
-                args.extend(["--session".into(), thread_id.into()]);
-            } else {
-                args.extend(["--name".into(), title.into()]);
-            }
-        }
-    }
+    let args = agent_args(kind, resume_id, &cwd, title, session_dir);
     let command_line = shell_command(agent_command, &args);
     let mut command = Command::new("zsh");
     command.args(["-lc", &command_line]);
@@ -281,6 +275,42 @@ fn run_thread(
         bail!("{agent_command} exited with {status}");
     }
     Ok(())
+}
+
+fn pi_session_dir<'a>(config: &'a config::Config, harness_id: &str) -> Option<&'a str> {
+    (harness_id == agent::PI_HARNESS_ID)
+        .then_some(config.pi.session_dir.as_deref())
+        .flatten()
+}
+
+fn agent_args(
+    kind: agent::HarnessKind,
+    resume_id: Option<&str>,
+    cwd: &str,
+    title: &str,
+    session_dir: Option<&str>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    match kind {
+        agent::HarnessKind::Codex => {
+            if let Some(thread_id) = resume_id {
+                args.extend(["resume".into(), thread_id.into(), "-C".into(), cwd.into()]);
+            } else {
+                args.extend(["-C".into(), cwd.into()]);
+            }
+        }
+        agent::HarnessKind::Pi => {
+            if let Some(thread_id) = resume_id {
+                args.extend(["--session".into(), thread_id.into()]);
+            } else {
+                args.extend(["--name".into(), title.into()]);
+            }
+            if let Some(session_dir) = session_dir {
+                args.extend(["--session-dir".into(), session_dir.into()]);
+            }
+        }
+    }
+    args
 }
 
 fn shell_command(command: &str, args: &[String]) -> String {
@@ -331,6 +361,30 @@ mod tests {
         assert_eq!(
             shell_command("codex agent", &args),
             "exec 'codex agent' resume 'thread; touch nope'"
+        );
+    }
+
+    #[test]
+    fn pi_args_include_configured_session_dir() {
+        assert_eq!(
+            agent_args(
+                agent::HarnessKind::Pi,
+                Some("thread-1"),
+                "/repo",
+                "Ignored",
+                Some("/tmp/pi sessions")
+            ),
+            vec!["--session", "thread-1", "--session-dir", "/tmp/pi sessions"]
+        );
+        assert_eq!(
+            agent_args(
+                agent::HarnessKind::Pi,
+                None,
+                "/repo",
+                "Named chat",
+                Some("/tmp/pi sessions")
+            ),
+            vec!["--name", "Named chat", "--session-dir", "/tmp/pi sessions"]
         );
     }
 }

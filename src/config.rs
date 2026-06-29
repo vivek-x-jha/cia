@@ -159,8 +159,106 @@ impl Config {
         }
         let source = fs::read_to_string(&path)
             .with_context(|| format!("failed to read configuration {}", path.display()))?;
-        toml::from_str(&source).with_context(|| format!("invalid configuration {}", path.display()))
+        let mut config: Self = toml::from_str(&source)
+            .with_context(|| format!("invalid configuration {}", path.display()))?;
+        config.expand_env();
+        Ok(config)
     }
+
+    fn expand_env(&mut self) {
+        self.codex.command = expand_env_vars(&self.codex.command);
+        self.pi.command = expand_env_vars(&self.pi.command);
+        self.pi.session_dir = self
+            .pi
+            .session_dir
+            .as_ref()
+            .map(|value| expand_env_vars(value));
+        self.tmux.command = expand_env_vars(&self.tmux.command);
+        self.tmux.agent_commands = self
+            .tmux
+            .agent_commands
+            .iter()
+            .map(|value| expand_env_vars(value))
+            .collect();
+        self.tmux.agent_window_names = self
+            .tmux
+            .agent_window_names
+            .iter()
+            .map(|value| expand_env_vars(value))
+            .collect();
+        self.tmux.new_window_prefix = expand_env_vars(&self.tmux.new_window_prefix);
+        self.theme.expand_env();
+    }
+}
+
+impl ThemeConfig {
+    fn expand_env(&mut self) {
+        self.background = expand_env_vars(&self.background);
+        self.surface = expand_env_vars(&self.surface);
+        self.foreground = expand_env_vars(&self.foreground);
+        self.muted = expand_env_vars(&self.muted);
+        self.accent = expand_env_vars(&self.accent);
+        self.selected = expand_env_vars(&self.selected);
+        self.success = expand_env_vars(&self.success);
+        self.warning = expand_env_vars(&self.warning);
+        self.error = expand_env_vars(&self.error);
+        self.status_projects = expand_env_vars(&self.status_projects);
+        self.status_threads = expand_env_vars(&self.status_threads);
+        self.status_open = expand_env_vars(&self.status_open);
+        self.status_new = expand_env_vars(&self.status_new);
+        self.status_search = expand_env_vars(&self.status_search);
+        self.status_archive = expand_env_vars(&self.status_archive);
+        self.status_archive_action = expand_env_vars(&self.status_archive_action);
+        self.status_unarchive = expand_env_vars(&self.status_unarchive);
+        self.status_delete = expand_env_vars(&self.status_delete);
+        self.status_help = expand_env_vars(&self.status_help);
+        self.preview_user = expand_env_vars(&self.preview_user);
+        self.preview_codex = expand_env_vars(&self.preview_codex);
+        self.preview_pi = expand_env_vars(&self.preview_pi);
+        self.preview_text = expand_env_vars(&self.preview_text);
+    }
+}
+
+fn expand_env_vars(value: &str) -> String {
+    let mut result = String::new();
+    let mut chars = value.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '$' {
+            result.push(character);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('$') => {
+                chars.next();
+                result.push('$');
+            }
+            Some('{') => {
+                chars.next();
+                let mut name = String::new();
+                for next in chars.by_ref() {
+                    if next == '}' {
+                        break;
+                    }
+                    name.push(next);
+                }
+                result.push_str(&env::var(&name).unwrap_or_default());
+            }
+            Some(next) if next == '_' || next.is_ascii_alphabetic() => {
+                let mut name = String::new();
+                while let Some(next) = chars.peek().copied() {
+                    if next == '_' || next.is_ascii_alphanumeric() {
+                        name.push(next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                result.push_str(&env::var(&name).unwrap_or_default());
+            }
+            _ => result.push('$'),
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -183,6 +281,19 @@ mod tests {
         assert_eq!(cfg.theme.status_projects, "#e6e6e6");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
         assert_eq!(cfg.theme.preview_pi, "#00ffff");
+    }
+
+    #[test]
+    fn expands_environment_variables_in_config_strings() {
+        env::set_var("CIA_TEST_COLOR_HEX", "#123456");
+        env::set_var("CIA_TEST_COMMAND", "wrapped-codex");
+        let mut cfg: Config = toml::from_str(
+            "[codex]\ncommand = \"$CIA_TEST_COMMAND\"\n[theme]\nstatus_open = \"${CIA_TEST_COLOR_HEX}\"\n",
+        )
+        .unwrap();
+        cfg.expand_env();
+        assert_eq!(cfg.codex.command, "wrapped-codex");
+        assert_eq!(cfg.theme.status_open, "#123456");
     }
 
     #[test]

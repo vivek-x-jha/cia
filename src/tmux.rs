@@ -37,6 +37,7 @@ pub struct AgentLaunch<'a> {
     pub thread_id: Option<&'a str>,
     pub cia_command: &'a str,
     pub agent_command: &'a str,
+    pub session_dir: Option<&'a str>,
 }
 
 pub struct Client {
@@ -97,6 +98,12 @@ impl Client {
             crate::runner::encode(launch.title),
             crate::runner::encode(launch.agent_command)
         ));
+        if let Some(session_dir) = launch.session_dir {
+            command.push_str(&format!(
+                " --session-dir-hex {}",
+                crate::runner::encode(session_dir)
+            ));
+        }
         self.open_agent_pane(
             launch.inventory,
             launch.cwd,
@@ -462,6 +469,7 @@ mod tests {
                 thread_id: Some("thread-1"),
                 cia_command: fake_cia.to_str().unwrap(),
                 agent_command: fake_codex.to_str().unwrap(),
+                session_dir: None,
             })
             .unwrap();
         assert_eq!(window.thread_id.as_deref(), Some("thread-1"));
@@ -507,6 +515,7 @@ mod tests {
                 thread_id: Some("thread-2"),
                 cia_command: fake_cia.to_str().unwrap(),
                 agent_command: fake_codex.to_str().unwrap(),
+                session_dir: None,
             })
             .unwrap();
         assert_eq!(second.window_id, window.window_id);
@@ -522,6 +531,7 @@ mod tests {
                 thread_id: None,
                 cia_command: fake_cia.to_str().unwrap(),
                 agent_command: fake_codex.to_str().unwrap(),
+                session_dir: None,
             })
             .unwrap();
         assert_eq!(new_chat.window_id, window.window_id);

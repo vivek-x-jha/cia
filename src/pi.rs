@@ -58,14 +58,6 @@ impl crate::agent::Client for Client {
         }
         Ok(Vec::new())
     }
-
-    fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
-        let Some(path) = find_session_path(&self.session_dir, thread_id)? else {
-            return Ok(());
-        };
-        fs::remove_file(path)?;
-        Ok(())
-    }
 }
 
 #[derive(Default)]
@@ -156,6 +148,7 @@ fn parse_thread(path: &Path) -> Result<Option<Thread>> {
         source: json!(PI_HARNESS_ID),
         git_info: None,
         archived: false,
+        path: Some(path.to_string_lossy().into_owned()),
     }))
 }
 
@@ -166,15 +159,6 @@ fn is_archived_path(root: &Path, path: &Path) -> bool {
             .next()
             .is_some_and(|component| component.as_os_str() == "archived")
     })
-}
-
-fn find_session_path(root: &Path, thread_id: &str) -> Result<Option<PathBuf>> {
-    for path in session_files(root)? {
-        if parse_session(&path)?.id.as_deref() == Some(thread_id) {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
 }
 
 fn parse_session(path: &Path) -> Result<Session> {
