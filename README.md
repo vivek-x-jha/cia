@@ -4,7 +4,7 @@
 <h3>Your agent chats, live panes, and projects in one tmux-native dashboard.</h3>
 
 <p>
-  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.1.1-eccef0?style=flat-square"></a>
+  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.2.0-eccef0?style=flat-square"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/built_with-Rust-ea6962?style=flat-square&logo=rust"></a>
   <a href="https://ratatui.rs/"><img alt="Ratatui" src="https://img.shields.io/badge/UI-Ratatui-a9b665?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-7daea3?style=flat-square"></a>
@@ -275,10 +275,15 @@ selected = "#30364a"
 success = "#9bd5a5"
 warning = "#e5c07b"
 error = "#e06c75"
+title_focused = "#d2fd9d"
+title_unfocused = "#5c617d"
+border_focused = "#000000"
+border_unfocused = "#5c617d"
 status_projects = "#e6e6e6"
 status_threads = "#000000"
 status_open = "#80d7fe"
-status_new = "#9bd5a5"
+status_new = "#80d7fe"
+status_new_chat = "#9bd5a5"
 status_search = "#0000ff"
 status_archive = "#e06c75"
 status_archive_action = "#e06c75"
@@ -336,8 +341,10 @@ using the defaults above.
 | `ui.archive_icon` | Icon shown beside archived chats in all-chats view; default `` |
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
 | `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors |
+| `theme.title_focused`, `theme.title_unfocused` | Focused and unfocused pane title colors; defaults match tmux bright green (`#d2fd9d`) and bright black (`#5c617d`) |
+| `theme.border_focused`, `theme.border_unfocused` | Focused and unfocused pane border colors; defaults are black (`#000000`) and bright black (`#5c617d`) |
 | `theme.status_projects`, `theme.status_threads` | Project/thread count colors in the top status bar |
-| `theme.status_open`, `theme.status_new`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Clickable action segment colors in the top status bar |
+| `theme.status_open`, `theme.status_new`, `theme.status_new_chat`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Clickable action segment colors in the top status bar |
 | `theme.archive_icon` | Color for archived-chat icon in all-chats view; default red (`#ff0000`); can be set to `$RED_HEX` |
 | `theme.preview_user`, `theme.preview_codex`, `theme.preview_pi` | Role label colors in the preview pane |
 | `theme.preview_text` | User and harness message text color in the preview pane |

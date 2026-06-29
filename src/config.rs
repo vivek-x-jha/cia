@@ -90,10 +90,15 @@ pub struct ThemeConfig {
     pub success: String,
     pub warning: String,
     pub error: String,
+    pub title_focused: String,
+    pub title_unfocused: String,
+    pub border_focused: String,
+    pub border_unfocused: String,
     pub status_projects: String,
     pub status_threads: String,
     pub status_open: String,
     pub status_new: String,
+    pub status_new_chat: String,
     pub status_search: String,
     pub status_archive: String,
     pub status_archive_action: String,
@@ -201,10 +206,15 @@ impl Default for ThemeConfig {
             success: "#9bd5a5".into(),
             warning: "#e5c07b".into(),
             error: "#e06c75".into(),
+            title_focused: "#d2fd9d".into(),
+            title_unfocused: "#5c617d".into(),
+            border_focused: "#000000".into(),
+            border_unfocused: "#5c617d".into(),
             status_projects: "#e6e6e6".into(),
             status_threads: "#000000".into(),
             status_open: "#80d7fe".into(),
-            status_new: "#9bd5a5".into(),
+            status_new: "#80d7fe".into(),
+            status_new_chat: "#9bd5a5".into(),
             status_search: "#0000ff".into(),
             status_archive: "#e06c75".into(),
             status_archive_action: "#e06c75".into(),
@@ -309,10 +319,15 @@ impl ThemeConfig {
         self.success = expand_env_vars(&self.success);
         self.warning = expand_env_vars(&self.warning);
         self.error = expand_env_vars(&self.error);
+        self.title_focused = expand_env_vars(&self.title_focused);
+        self.title_unfocused = expand_env_vars(&self.title_unfocused);
+        self.border_focused = expand_env_vars(&self.border_focused);
+        self.border_unfocused = expand_env_vars(&self.border_unfocused);
         self.status_projects = expand_env_vars(&self.status_projects);
         self.status_threads = expand_env_vars(&self.status_threads);
         self.status_open = expand_env_vars(&self.status_open);
         self.status_new = expand_env_vars(&self.status_new);
+        self.status_new_chat = expand_env_vars(&self.status_new_chat);
         self.status_search = expand_env_vars(&self.status_search);
         self.status_archive = expand_env_vars(&self.status_archive);
         self.status_archive_action = expand_env_vars(&self.status_archive_action);
@@ -398,6 +413,12 @@ mod tests {
         let cfg: Config = toml::from_str("[theme]\nstatus_open = \"#112233\"\n").unwrap();
         assert_eq!(cfg.theme.status_open, "#112233");
         assert_eq!(cfg.theme.status_projects, "#e6e6e6");
+        assert_eq!(cfg.theme.title_focused, "#d2fd9d");
+        assert_eq!(cfg.theme.title_unfocused, "#5c617d");
+        assert_eq!(cfg.theme.border_focused, "#000000");
+        assert_eq!(cfg.theme.border_unfocused, "#5c617d");
+        assert_eq!(cfg.theme.status_new, "#80d7fe");
+        assert_eq!(cfg.theme.status_new_chat, "#9bd5a5");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
         assert_eq!(cfg.theme.preview_pi, "#00ffff");
     }

@@ -1617,10 +1617,15 @@ struct ResolvedTheme {
     muted: Color,
     accent: Color,
     error: Color,
+    title_focused: Color,
+    title_unfocused: Color,
+    border_focused: Color,
+    border_unfocused: Color,
     status_projects: Color,
     status_threads: Color,
     status_open: Color,
     status_new: Color,
+    status_new_chat: Color,
     status_search: Color,
     status_archive: Color,
     status_archive_action: Color,
@@ -1644,10 +1649,15 @@ impl From<&ThemeConfig> for ResolvedTheme {
             muted: color(&value.muted),
             accent: color(&value.accent),
             error: color(&value.error),
+            title_focused: color(&value.title_focused),
+            title_unfocused: color(&value.title_unfocused),
+            border_focused: color(&value.border_focused),
+            border_unfocused: color(&value.border_unfocused),
             status_projects: color(&value.status_projects),
             status_threads: color(&value.status_threads),
             status_open: color(&value.status_open),
             status_new: color(&value.status_new),
+            status_new_chat: color(&value.status_new_chat),
             status_search: color(&value.status_search),
             status_archive: color(&value.status_archive),
             status_archive_action: color(&value.status_archive_action),
@@ -1679,8 +1689,17 @@ fn color(value: &str) -> Color {
 fn panel<'a>(title: &'a str, focused: bool, theme: ResolvedTheme) -> Block<'a> {
     Block::default()
         .title(title)
+        .title_style(Style::default().fg(if focused {
+            theme.title_focused
+        } else {
+            theme.title_unfocused
+        }))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if focused { theme.accent } else { theme.muted }))
+        .border_style(Style::default().fg(if focused {
+            theme.border_focused
+        } else {
+            theme.border_unfocused
+        }))
         .style(Style::default().fg(theme.foreground))
 }
 
@@ -1935,7 +1954,7 @@ fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
     match action {
         StatusAction::Open => theme.status_open,
         StatusAction::NewProject => theme.status_new,
-        StatusAction::New => theme.status_new,
+        StatusAction::New => theme.status_new_chat,
         StatusAction::Search => theme.status_search,
         StatusAction::ToggleArchived => theme.status_archive,
         StatusAction::SetArchived => theme.status_archive_action,
