@@ -1203,7 +1203,7 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
                 .map(|harness| harness.marker.as_str())
                 .unwrap_or("?");
             let harness_color = harness_id
-                .and_then(harness_brand_color)
+                .map(|harness_id| new_chat_harness_color(harness_id, theme))
                 .unwrap_or(theme.muted);
             let archive_marker = match row {
                 Row::Thread { thread, .. } if app.show_archived && thread.archived => Span::styled(
@@ -1352,8 +1352,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                                 .fg(if is_user {
                                     theme.preview_user
                                 } else {
-                                    harness_brand_color(&thread.harness_id)
-                                        .unwrap_or(theme.preview_codex)
+                                    new_chat_harness_color(&thread.harness_id, theme)
                                 })
                                 .add_modifier(Modifier::BOLD),
                         ));
@@ -1663,7 +1662,6 @@ struct ResolvedTheme {
     status_help: Color,
     archive_icon: Color,
     preview_user: Color,
-    preview_codex: Color,
     preview_text: Color,
     preview_title: Color,
     new_chat_unfocused: Color,
@@ -1703,7 +1701,6 @@ impl From<&ThemeConfig> for ResolvedTheme {
             status_help: color(&value.status_help),
             archive_icon: color(&value.archive_icon),
             preview_user: color(&value.preview_user),
-            preview_codex: color(&value.preview_codex),
             preview_text: color(&value.preview_text),
             preview_title: color(&value.preview_title),
             new_chat_unfocused: color(&value.new_chat_unfocused),
@@ -2013,15 +2010,6 @@ fn split_executable_path(path: &str) -> (&str, &str) {
     path.rsplit_once('/')
         .map(|(prefix, executable)| (&path[..prefix.len() + 1], executable))
         .unwrap_or(("", path))
-}
-
-fn harness_brand_color(harness_id: &str) -> Option<Color> {
-    match harness_id {
-        PI_HARNESS_ID => Some(Color::Rgb(0xec, 0xce, 0xf0)),
-        CLAUDE_HARNESS_ID => Some(Color::Rgb(0xf3, 0xb1, 0x75)),
-        CODEX_HARNESS_ID => Some(Color::Rgb(0x80, 0xd7, 0xfe)),
-        _ => None,
-    }
 }
 
 fn new_chat_harness_color(harness_id: &str, theme: ResolvedTheme) -> Color {

@@ -146,8 +146,9 @@ The top status bar mirrors these actions with clickable text segments. The left
 side shows project/thread counts plus help and search. The right side shows open,
 all/current, new project, new chat, archive/unarchive, and delete. Segment colors are configurable
 under `[theme]`; harness icons are configurable under each harness section and
-are shown in the chats list, preview role labels, and new-chat picker. Pi,
-Claude Code, and Codex icons use built-in brand colors in chats and previews: Pi magenta, Claude Code bright yellow, and Codex bright blue.
+are shown in the chats list, preview role labels, and new-chat picker. Harness
+icon colors in chats, previews, and the new-chat picker share the
+`theme.new_chat_*` harness color settings.
 The new-chat harness picker is ordered Pi, Claude Code, Codex, Cursor, OpenCode.
 
 ## How Sessions Work
@@ -359,11 +360,11 @@ using the defaults above.
 | `theme.status_open`, `theme.status_new`, `theme.status_new_chat`, `theme.status_search`, `theme.status_archive`, `theme.status_archive_action`, `theme.status_unarchive`, `theme.status_delete`, `theme.status_help` | Clickable action segment colors in the top status bar |
 | `theme.archive_icon` | Color for archived-chat icon in all-chats view; default red (`#ff0000`); can be set to `$RED_HEX` |
 | `theme.preview_user` | User role label color in the preview pane |
-| `theme.preview_codex`, `theme.preview_pi` | Legacy preview role colors retained for compatibility; Pi, Claude Code, and Codex now use built-in icon brand colors |
+| `theme.preview_codex`, `theme.preview_pi` | Legacy preview role colors retained for configuration compatibility; harness role icons use the `theme.new_chat_*` harness colors |
 | `theme.preview_text` | User and harness message text color in the preview pane |
 | `theme.preview_title` | Selected chat title color at the top of the preview pane; default `$CYAN_HEX` |
 | `theme.new_chat_unfocused` | New-chat harness picker foreground color for unfocused choices; default `$BRIGHTBLACK_HEX` |
-| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | New-chat harness picker foreground colors for the focused harness label; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
+| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | Harness icon and new-chat picker foreground colors; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
 | `theme.new_chat_path`, `theme.new_chat_executable` | Focused CLI path colors in the new-chat harness picker; defaults use `$BLUE_HEX` for the path and `$BRIGHTGREEN_HEX` for the executable name |
 
 ## Data and Safety
