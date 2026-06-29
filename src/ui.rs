@@ -1369,15 +1369,100 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
 }
 
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
-    let popup = centered(area, 64, 18);
+    let popup = centered(area, 74, 18);
     frame.render_widget(Clear, popup);
-    let help = "Navigation\n  Tab / h / l       change pane\n  j / Ctrl+n / down move selection down\n  k / Ctrl+p / up   move selection up\n  Ctrl+d / Ctrl+u   scroll preview\n  gg / G             first / last selection\n  Enter              switch or resume\n\nActions\n  N new project n new chat   / search\n  a active/all  A archive    U unarchive\n  D delete      r refresh    q/Esc close  ? help";
+    frame.render_widget(panel(" CIA Help ", true, theme), popup);
+
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+    let rows = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(8),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+    let columns =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
+
     frame.render_widget(
-        Paragraph::new(help)
-            .block(panel(" CIA Help ", true, theme))
-            .style(Style::default().fg(theme.foreground)),
-        popup,
+        Paragraph::new(Text::from(vec![
+            Line::styled(
+                "Keyboard-first controls. Press any key, Esc, or click outside to close.",
+                Style::default().fg(theme.muted),
+            ),
+            Line::from(""),
+        ])),
+        rows[0],
     );
+    frame.render_widget(
+        Paragraph::new(help_section(
+            "Navigate",
+            &[
+                ("Tab / h / l", "change pane"),
+                ("j / ↓", "move down"),
+                ("k / ↑", "move up"),
+                ("Ctrl+n / Ctrl+p", "next / previous"),
+                ("gg / G", "first / last"),
+                ("Ctrl+d / Ctrl+u", "scroll preview"),
+            ],
+            theme,
+        )),
+        columns[0],
+    );
+    frame.render_widget(
+        Paragraph::new(help_section(
+            "Act",
+            &[
+                ("Enter", "open or resume"),
+                ("N / n", "new project / chat"),
+                ("/", "search"),
+                ("a", "active / all"),
+                ("A / U", "archive / unarchive"),
+                ("D", "delete or hide"),
+                ("r", "refresh"),
+                ("q / Esc", "quit"),
+            ],
+            theme,
+        )),
+        columns[1],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            "Tip: the top bar has clickable shortcuts for the same actions.",
+            Style::default().fg(theme.muted),
+        )),
+        rows[2],
+    );
+}
+
+fn help_section(
+    title: &'static str,
+    rows: &[(&'static str, &'static str)],
+    theme: ResolvedTheme,
+) -> Text<'static> {
+    let mut lines = vec![
+        Line::styled(
+            title,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::from(""),
+    ];
+    lines.extend(rows.iter().map(|(keys, description)| {
+        Line::from(vec![
+            Span::styled(
+                format!("{keys:<17}"),
+                Style::default()
+                    .fg(theme.status_help)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(*description, Style::default().fg(theme.foreground)),
+        ])
+    }));
+    Text::from(lines)
 }
 
 fn draw_delete_prompt(
