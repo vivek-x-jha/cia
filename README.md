@@ -301,7 +301,7 @@ preview_title = "$CYAN_HEX"
 new_chat_unfocused = "$BRIGHTBLACK_HEX"
 new_chat_pi = "$MAGENTA_HEX"
 new_chat_claude = "$BRIGHTYELLOW_HEX"
-new_chat_codex = "$BRIGHTBLUE_HEX"
+new_chat_codex = "$BRIGHTMAGENTA_HEX"
 new_chat_cursor = "$MAGENTA_HEX"
 new_chat_opencode = "$GREEN_HEX"
 new_chat_path = "$BLUE_HEX"
@@ -363,7 +363,7 @@ using the defaults above.
 | `theme.preview_text` | User and harness message text color in the preview pane |
 | `theme.preview_title` | Selected chat title color at the top of the preview pane; default `$CYAN_HEX` |
 | `theme.new_chat_unfocused` | New-chat harness picker foreground color for unfocused choices; default `$BRIGHTBLACK_HEX` |
-| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | New-chat harness picker foreground colors for the focused harness label; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTBLUE_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
+| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | New-chat harness picker foreground colors for the focused harness label; defaults use `$MAGENTA_HEX`, `$BRIGHTYELLOW_HEX`, `$BRIGHTMAGENTA_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
 | `theme.new_chat_path`, `theme.new_chat_executable` | Focused CLI path colors in the new-chat harness picker; defaults use `$BLUE_HEX` for the path and `$BRIGHTGREEN_HEX` for the executable name |
 
 ## Data and Safety

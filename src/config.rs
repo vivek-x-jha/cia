@@ -239,7 +239,7 @@ impl Default for ThemeConfig {
             new_chat_unfocused: "$BRIGHTBLACK_HEX".into(),
             new_chat_pi: "$MAGENTA_HEX".into(),
             new_chat_claude: "$BRIGHTYELLOW_HEX".into(),
-            new_chat_codex: "$BRIGHTBLUE_HEX".into(),
+            new_chat_codex: "$BRIGHTMAGENTA_HEX".into(),
             new_chat_cursor: "$MAGENTA_HEX".into(),
             new_chat_opencode: "$GREEN_HEX".into(),
             new_chat_path: "$BLUE_HEX".into(),
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(cfg.theme.new_chat_unfocused, "$BRIGHTBLACK_HEX");
         assert_eq!(cfg.theme.new_chat_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_claude, "$BRIGHTYELLOW_HEX");
-        assert_eq!(cfg.theme.new_chat_codex, "$BRIGHTBLUE_HEX");
+        assert_eq!(cfg.theme.new_chat_codex, "$BRIGHTMAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_cursor, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_opencode, "$GREEN_HEX");
         assert_eq!(cfg.theme.new_chat_path, "$BLUE_HEX");
