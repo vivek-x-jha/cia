@@ -1254,11 +1254,15 @@ fn draw_projects(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resol
         .map(|project| {
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    "● ",
-                    Style::default().fg(if project.agents.is_empty() {
-                        theme.muted
+                    if project.agents.is_empty() {
+                        "○ "
                     } else {
-                        theme.success
+                        "● "
+                    },
+                    Style::default().fg(if project.agents.is_empty() {
+                        theme.inactive
+                    } else {
+                        theme.live
                     }),
                 ),
                 Span::raw(&project.name),
@@ -1285,9 +1289,9 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
         .iter()
         .map(|row| {
             let marker = if row.is_live() {
-                Span::styled("● ", Style::default().fg(theme.success))
+                Span::styled("● ", Style::default().fg(theme.live))
             } else {
-                Span::styled("  ", Style::default().fg(theme.muted))
+                Span::styled("○ ", Style::default().fg(theme.inactive))
             };
             let harness_id = row_harness_id(row);
             let harness = harness_id
@@ -1392,31 +1396,58 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                 let harness_label = harness
                     .map(|harness| harness.label.as_str())
                     .unwrap_or(thread.harness_id.as_str());
-                text.push_line(Line::styled(
-                    thread.title().to_string(),
-                    Style::default()
-                        .fg(theme.preview_title)
-                        .add_modifier(Modifier::BOLD),
-                ));
+                let status = if live.is_some() {
+                    Span::styled(" ● live", Style::default().fg(theme.live))
+                } else {
+                    Span::styled(" ○ inactive", Style::default().fg(theme.inactive))
+                };
+                text.push_line(Line::from(vec![
+                    Span::styled(
+                        thread.title().to_string(),
+                        Style::default()
+                            .fg(theme.preview_title)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    status,
+                ]));
                 let branch = thread
                     .git_info
                     .as_ref()
                     .and_then(|git| git.branch.as_deref())
                     .unwrap_or("no branch");
-                text.push_line(Line::styled(
-                    format!(
-                        "{} · {} · {} · created {} · {}",
-                        harness_label,
-                        thread.source_label(),
-                        branch,
-                        format_timestamp(thread.created_at),
-                        thread.cwd
-                    ),
-                    Style::default().fg(theme.muted),
+                text.push_line(harness_metadata_line(
+                    "Harness",
+                    harness
+                        .map(|harness| harness.marker.as_str())
+                        .unwrap_or("?"),
+                    harness_label,
+                    new_chat_harness_color(&thread.harness_id, theme),
+                    theme,
                 ));
-                if live.is_some() {
-                    text.push_line(Line::styled("● live", Style::default().fg(theme.success)));
-                }
+                text.push_line(metadata_line(
+                    "Source",
+                    thread.source_label(),
+                    theme.preview_metadata_source,
+                    theme,
+                ));
+                text.push_line(metadata_line(
+                    "Branch",
+                    branch,
+                    theme.preview_metadata_branch,
+                    theme,
+                ));
+                text.push_line(metadata_line(
+                    "Created",
+                    format_timestamp(thread.created_at),
+                    theme.preview_metadata_date,
+                    theme,
+                ));
+                text.push_line(metadata_line(
+                    "Path",
+                    thread.cwd.as_str(),
+                    theme.preview_metadata_path,
+                    theme,
+                ));
                 text.push_line("");
                 if app.preview.is_empty() {
                     let preview = if thread.preview.is_empty() {
@@ -1459,6 +1490,41 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
         }
     }
     text
+}
+
+fn metadata_line(
+    key: &str,
+    value: impl AsRef<str>,
+    value_color: Color,
+    theme: ResolvedTheme,
+) -> Line<'static> {
+    Line::from(vec![
+        metadata_key_span(key, theme),
+        Span::styled(value.as_ref().to_string(), Style::default().fg(value_color)),
+    ])
+}
+
+fn harness_metadata_line(
+    key: &str,
+    marker: &str,
+    label: &str,
+    harness_color: Color,
+    theme: ResolvedTheme,
+) -> Line<'static> {
+    Line::from(vec![
+        metadata_key_span(key, theme),
+        Span::styled(format!("{marker} "), Style::default().fg(harness_color)),
+        Span::styled(label.to_string(), Style::default().fg(harness_color)),
+    ])
+}
+
+fn metadata_key_span(key: &str, theme: ResolvedTheme) -> Span<'static> {
+    Span::styled(
+        format!("{key}: "),
+        Style::default()
+            .fg(theme.preview_metadata_key)
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
@@ -1778,6 +1844,11 @@ struct ResolvedTheme {
     preview_user: Color,
     preview_text: Color,
     preview_title: Color,
+    preview_metadata_key: Color,
+    preview_metadata_source: Color,
+    preview_metadata_branch: Color,
+    preview_metadata_date: Color,
+    preview_metadata_path: Color,
     new_chat_unfocused: Color,
     new_chat_pi: Color,
     new_chat_claude: Color,
@@ -1787,7 +1858,8 @@ struct ResolvedTheme {
     new_chat_path: Color,
     new_chat_executable: Color,
     selected: Color,
-    success: Color,
+    live: Color,
+    inactive: Color,
     warning: Color,
 }
 
@@ -1819,6 +1891,11 @@ impl From<&ThemeConfig> for ResolvedTheme {
             preview_user: color(&value.preview_user),
             preview_text: color(&value.preview_text),
             preview_title: color(&value.preview_title),
+            preview_metadata_key: color(&value.preview_metadata_key),
+            preview_metadata_source: color(&value.preview_metadata_source),
+            preview_metadata_branch: color(&value.preview_metadata_branch),
+            preview_metadata_date: color(&value.preview_metadata_date),
+            preview_metadata_path: color(&value.preview_metadata_path),
             new_chat_unfocused: color(&value.new_chat_unfocused),
             new_chat_pi: color(&value.new_chat_pi),
             new_chat_claude: color(&value.new_chat_claude),
@@ -1828,7 +1905,8 @@ impl From<&ThemeConfig> for ResolvedTheme {
             new_chat_path: color(&value.new_chat_path),
             new_chat_executable: color(&value.new_chat_executable),
             selected: color(&value.selected),
-            success: color(&value.success),
+            live: color(&value.live),
+            inactive: color(&value.inactive),
             warning: color(&value.warning),
         }
     }

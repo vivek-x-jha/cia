@@ -94,6 +94,8 @@ pub struct ThemeConfig {
     pub accent: String,
     pub selected: String,
     pub success: String,
+    pub live: String,
+    pub inactive: String,
     pub warning: String,
     pub error: String,
     pub title_focused: String,
@@ -117,6 +119,11 @@ pub struct ThemeConfig {
     pub preview_pi: String,
     pub preview_text: String,
     pub preview_title: String,
+    pub preview_metadata_key: String,
+    pub preview_metadata_source: String,
+    pub preview_metadata_branch: String,
+    pub preview_metadata_date: String,
+    pub preview_metadata_path: String,
     pub new_chat_unfocused: String,
     pub new_chat_pi: String,
     pub new_chat_claude: String,
@@ -220,6 +227,8 @@ impl Default for ThemeConfig {
             accent: "#a8c7fa".into(),
             selected: "#30364a".into(),
             success: "#9bd5a5".into(),
+            live: "$GREEN_HEX".into(),
+            inactive: "$BRIGHTBLACK_HEX".into(),
             warning: "#e5c07b".into(),
             error: "$BRIGHTRED_HEX".into(),
             title_focused: "#d2fd9d".into(),
@@ -243,6 +252,11 @@ impl Default for ThemeConfig {
             preview_pi: "$MAGENTA_HEX".into(),
             preview_text: "#e6e6e6".into(),
             preview_title: "$CYAN_HEX".into(),
+            preview_metadata_key: "$BLACK_HEX".into(),
+            preview_metadata_source: "$BRIGHTBLACK_HEX".into(),
+            preview_metadata_branch: "$MAGENTA_HEX".into(),
+            preview_metadata_date: "$BRIGHTMAGENTA_HEX".into(),
+            preview_metadata_path: "$BLUE_HEX".into(),
             new_chat_unfocused: "$BRIGHTBLACK_HEX".into(),
             new_chat_pi: "$MAGENTA_HEX".into(),
             new_chat_claude: "$BRIGHTYELLOW_HEX".into(),
@@ -345,6 +359,8 @@ impl ThemeConfig {
         self.accent = expand_env_vars(&self.accent);
         self.selected = expand_env_vars(&self.selected);
         self.success = expand_env_vars(&self.success);
+        self.live = expand_env_vars(&self.live);
+        self.inactive = expand_env_vars(&self.inactive);
         self.warning = expand_env_vars(&self.warning);
         self.error = expand_env_vars(&self.error);
         self.title_focused = expand_env_vars(&self.title_focused);
@@ -368,6 +384,11 @@ impl ThemeConfig {
         self.preview_pi = expand_env_vars(&self.preview_pi);
         self.preview_text = expand_env_vars(&self.preview_text);
         self.preview_title = expand_env_vars(&self.preview_title);
+        self.preview_metadata_key = expand_env_vars(&self.preview_metadata_key);
+        self.preview_metadata_source = expand_env_vars(&self.preview_metadata_source);
+        self.preview_metadata_branch = expand_env_vars(&self.preview_metadata_branch);
+        self.preview_metadata_date = expand_env_vars(&self.preview_metadata_date);
+        self.preview_metadata_path = expand_env_vars(&self.preview_metadata_path);
         self.new_chat_unfocused = expand_env_vars(&self.new_chat_unfocused);
         self.new_chat_pi = expand_env_vars(&self.new_chat_pi);
         self.new_chat_claude = expand_env_vars(&self.new_chat_claude);
@@ -457,9 +478,16 @@ mod tests {
         assert_eq!(cfg.theme.border_unfocused, "#5c617d");
         assert_eq!(cfg.theme.status_new, "#80d7fe");
         assert_eq!(cfg.theme.status_new_chat, "#9bd5a5");
+        assert_eq!(cfg.theme.live, "$GREEN_HEX");
+        assert_eq!(cfg.theme.inactive, "$BRIGHTBLACK_HEX");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
         assert_eq!(cfg.theme.preview_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.preview_title, "$CYAN_HEX");
+        assert_eq!(cfg.theme.preview_metadata_key, "$BLACK_HEX");
+        assert_eq!(cfg.theme.preview_metadata_source, "$BRIGHTBLACK_HEX");
+        assert_eq!(cfg.theme.preview_metadata_branch, "$MAGENTA_HEX");
+        assert_eq!(cfg.theme.preview_metadata_date, "$BRIGHTMAGENTA_HEX");
+        assert_eq!(cfg.theme.preview_metadata_path, "$BLUE_HEX");
         assert_eq!(cfg.theme.new_chat_unfocused, "$BRIGHTBLACK_HEX");
         assert_eq!(cfg.theme.new_chat_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_claude, "$BRIGHTYELLOW_HEX");
