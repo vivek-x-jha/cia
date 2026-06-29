@@ -1332,24 +1332,34 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
 }
 
 fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
-    let title = " Preview ";
-    let block = panel(title, app.focus == Focus::Preview, theme);
-    let viewport_height = area
-        .inner(Margin {
-            vertical: 1,
-            horizontal: 1,
-        })
-        .height as usize;
-    let text = preview_text(app, theme);
-    let content_height = text.lines.len();
+    let block = panel(" Preview ", app.focus == Focus::Preview, theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let (header, body) = preview_content(app, theme);
+    let chunks = Layout::vertical([
+        Constraint::Length(header.lines.len() as u16),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(inner);
+
+    frame.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), chunks[0]);
+    frame.render_widget(
+        Paragraph::new("─".repeat(chunks[1].width as usize))
+            .style(Style::default().fg(theme.muted)),
+        chunks[1],
+    );
+
+    let viewport_height = chunks[2].height as usize;
+    let content_height = body.lines.len();
     let max_scroll = content_height.saturating_sub(viewport_height);
     let scroll = max_scroll.saturating_sub(app.preview_scroll as usize);
     frame.render_widget(
-        Paragraph::new(text)
-            .block(block)
+        Paragraph::new(body)
             .scroll((scroll as u16, 0))
             .wrap(Wrap { trim: false }),
-        area,
+        chunks[2],
     );
     if max_scroll > 0 {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -1361,46 +1371,39 @@ fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
         let mut state = ScrollbarState::new(content_height)
             .position(scroll)
             .viewport_content_length(viewport_height);
-        frame.render_stateful_widget(
-            scrollbar,
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            &mut state,
-        );
+        frame.render_stateful_widget(scrollbar, chunks[2], &mut state);
     }
 }
 
-fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
+fn preview_content(app: &App, theme: ResolvedTheme) -> (Text<'static>, Text<'static>) {
     let rows = app.current_rows();
-    let mut text = Text::default();
+    let mut header = Text::default();
+    let mut body = Text::default();
     if let Some(row) = rows.get(app.row_index) {
         match row {
             Row::Agent(window) => {
-                text.push_line(Line::styled(
+                header.push_line(Line::styled(
                     "Unmapped live agent",
                     Style::default()
                         .fg(theme.warning)
                         .add_modifier(Modifier::BOLD),
                 ));
-                text.push_line(format!(
+                header.push_line(format!(
                     "{}:{} · {}",
                     window.session, window.window_name, window.cwd
                 ));
-                text.push_line("");
-                text.push_line("CIA will switch to this window without guessing which saved thread it contains.");
+                body.push_line("CIA will switch to this window without guessing which saved thread it contains.");
             }
             Row::Thread { thread, live } => {
                 let harness = app.harness(&thread.harness_id);
-                text.push_line(metadata_line(
+                header.push_line(metadata_line(
                     "Thread",
                     thread.title(),
                     theme.preview_metadata_thread,
                     theme,
                 ));
-                text.push_line(status_metadata_line("Status", live.is_some(), theme));
-                text.push_line(harness_metadata_line(
+                header.push_line(status_metadata_line("Status", live.is_some(), theme));
+                header.push_line(harness_metadata_line(
                     "Harness",
                     harness
                         .map(|harness| harness.marker.as_str())
@@ -1408,26 +1411,25 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     new_chat_harness_color(&thread.harness_id, theme),
                     theme,
                 ));
-                text.push_line(metadata_line(
+                header.push_line(metadata_line(
                     "Created",
                     format_timestamp(thread.created_at),
                     theme.preview_metadata_date,
                     theme,
                 ));
-                text.push_line(metadata_line(
+                header.push_line(metadata_line(
                     "CWD",
                     format_cwd(&thread.cwd),
                     theme.preview_metadata_path,
                     theme,
                 ));
-                text.push_line("");
                 if app.preview.is_empty() {
                     let preview = if thread.preview.is_empty() {
                         "No transcript preview available.".to_string()
                     } else {
                         thread.preview.clone()
                     };
-                    text.push_line(Line::styled(
+                    body.push_line(Line::styled(
                         preview,
                         Style::default().fg(theme.preview_text),
                     ));
@@ -1441,7 +1443,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                                 .map(|harness| harness.marker.as_str())
                                 .unwrap_or(message.role.as_str())
                         };
-                        text.push_line(Line::styled(
+                        body.push_line(Line::styled(
                             role.to_string(),
                             Style::default()
                                 .fg(if is_user {
@@ -1451,17 +1453,17 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                                 })
                                 .add_modifier(Modifier::BOLD),
                         ));
-                        text.push_line(Line::styled(
+                        body.push_line(Line::styled(
                             message.text.clone(),
                             Style::default().fg(theme.preview_text),
                         ));
-                        text.push_line("");
+                        body.push_line("");
                     }
                 }
             }
         }
     }
-    text
+    (header, body)
 }
 
 fn metadata_line(
