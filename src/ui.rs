@@ -1393,20 +1393,13 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
             }
             Row::Thread { thread, live } => {
                 let harness = app.harness(&thread.harness_id);
-                let status = if live.is_some() {
-                    Span::styled(" ● live", Style::default().fg(theme.live))
-                } else {
-                    Span::styled(" ○ inactive", Style::default().fg(theme.inactive))
-                };
-                text.push_line(Line::from(vec![
-                    Span::styled(
-                        thread.title().to_string(),
-                        Style::default()
-                            .fg(theme.preview_title)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    status,
-                ]));
+                text.push_line(metadata_line(
+                    "Thread",
+                    thread.title(),
+                    theme.preview_metadata_thread,
+                    theme,
+                ));
+                text.push_line(status_metadata_line("Status", live.is_some(), theme));
                 text.push_line(harness_metadata_line(
                     "Harness",
                     harness
@@ -1422,8 +1415,8 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                     theme,
                 ));
                 text.push_line(metadata_line(
-                    "Path",
-                    thread.cwd.as_str(),
+                    "CWD",
+                    format_cwd(&thread.cwd),
                     theme.preview_metadata_path,
                     theme,
                 ));
@@ -1492,6 +1485,18 @@ fn harness_metadata_line(
     Line::from(vec![
         metadata_key_span(key, theme),
         Span::styled(marker.to_string(), Style::default().fg(harness_color)),
+    ])
+}
+
+fn status_metadata_line(key: &str, is_live: bool, theme: ResolvedTheme) -> Line<'static> {
+    let (label, color) = if is_live {
+        ("● active", theme.live)
+    } else {
+        ("○ inactive", theme.inactive)
+    };
+    Line::from(vec![
+        metadata_key_span(key, theme),
+        Span::styled(label, Style::default().fg(color)),
     ])
 }
 
@@ -1820,8 +1825,8 @@ struct ResolvedTheme {
     archive_icon: Color,
     preview_user: Color,
     preview_text: Color,
-    preview_title: Color,
     preview_metadata_key: Color,
+    preview_metadata_thread: Color,
     preview_metadata_date: Color,
     preview_metadata_path: Color,
     new_chat_unfocused: Color,
@@ -1865,8 +1870,8 @@ impl From<&ThemeConfig> for ResolvedTheme {
             archive_icon: color(&value.archive_icon),
             preview_user: color(&value.preview_user),
             preview_text: color(&value.preview_text),
-            preview_title: color(&value.preview_title),
             preview_metadata_key: color(&value.preview_metadata_key),
+            preview_metadata_thread: color(&value.preview_metadata_thread),
             preview_metadata_date: color(&value.preview_metadata_date),
             preview_metadata_path: color(&value.preview_metadata_path),
             new_chat_unfocused: color(&value.new_chat_unfocused),
@@ -2300,15 +2305,28 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 
 fn format_timestamp(timestamp: i64) -> String {
     time::OffsetDateTime::from_unix_timestamp(timestamp)
-        .map(|date| {
-            format!(
-                "{:04}-{:02}-{:02}",
-                date.year(),
-                u8::from(date.month()),
-                date.day()
-            )
-        })
+        .map(|date| format!("{} {:02}, {}", date.month(), date.day(), date.year()))
         .unwrap_or_else(|_| timestamp.to_string())
+}
+
+fn format_cwd(cwd: &str) -> String {
+    let display = env::var_os("HOME")
+        .and_then(|home| {
+            let home = PathBuf::from(home);
+            Path::new(cwd).strip_prefix(&home).ok().map(|relative| {
+                if relative.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~/{}", relative.display())
+                }
+            })
+        })
+        .unwrap_or_else(|| cwd.to_string());
+    if display.ends_with('/') {
+        display
+    } else {
+        format!("{display}/")
+    }
 }
 
 #[cfg(test)]
@@ -2325,7 +2343,7 @@ mod tests {
     }
     #[test]
     fn formats_thread_dates() {
-        assert_eq!(format_timestamp(0), "1970-01-01");
+        assert_eq!(format_timestamp(0), "January 01, 1970");
     }
     #[test]
     fn finds_delete_prompt_mouse_choices() {
