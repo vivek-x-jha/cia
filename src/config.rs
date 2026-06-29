@@ -3,6 +3,11 @@ use std::{env, fs, path::PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+const DEFAULT_UI_ARCHIVE_ICON: &str = "";
+const DEFAULT_UI_DEFAULT_HARNESS: &str = "pi";
+const DEFAULT_NEW_CHAT_CURSOR_COLOR: &str = "$BLACK_HEX";
+const DEFAULT_NEW_CHAT_OPENCODE_COLOR: &str = "$WHITE_HEX";
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -199,8 +204,8 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             archived_default: false,
-            archive_icon: "".into(),
-            default_harness: "pi".into(),
+            archive_icon: DEFAULT_UI_ARCHIVE_ICON.into(),
+            default_harness: DEFAULT_UI_DEFAULT_HARNESS.into(),
         }
     }
 }
@@ -242,8 +247,8 @@ impl Default for ThemeConfig {
             new_chat_pi: "$MAGENTA_HEX".into(),
             new_chat_claude: "$BRIGHTYELLOW_HEX".into(),
             new_chat_codex: "$BRIGHTMAGENTA_HEX".into(),
-            new_chat_cursor: "$BLACK_HEX".into(),
-            new_chat_opencode: "$WHITE_HEX".into(),
+            new_chat_cursor: DEFAULT_NEW_CHAT_CURSOR_COLOR.into(),
+            new_chat_opencode: DEFAULT_NEW_CHAT_OPENCODE_COLOR.into(),
             new_chat_path: "$BLUE_HEX".into(),
             new_chat_executable: "$BRIGHTGREEN_HEX".into(),
         }
@@ -432,8 +437,8 @@ mod tests {
         assert_eq!(cfg.cursor.command, "cursor");
         assert_eq!(cfg.cursor.icon, "󰋙");
         assert_eq!(cfg.opencode.command, "opencode");
-        assert_eq!(cfg.ui.archive_icon, "");
-        assert_eq!(cfg.ui.default_harness, "pi");
+        assert_eq!(cfg.ui.archive_icon, DEFAULT_UI_ARCHIVE_ICON);
+        assert_eq!(cfg.ui.default_harness, DEFAULT_UI_DEFAULT_HARNESS);
         assert_eq!(cfg.opencode.icon, "");
         assert_eq!(
             cfg.tmux.agent_commands,
@@ -459,8 +464,8 @@ mod tests {
         assert_eq!(cfg.theme.new_chat_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_claude, "$BRIGHTYELLOW_HEX");
         assert_eq!(cfg.theme.new_chat_codex, "$BRIGHTMAGENTA_HEX");
-        assert_eq!(cfg.theme.new_chat_cursor, "$BLACK_HEX");
-        assert_eq!(cfg.theme.new_chat_opencode, "$WHITE_HEX");
+        assert_eq!(cfg.theme.new_chat_cursor, DEFAULT_NEW_CHAT_CURSOR_COLOR);
+        assert_eq!(cfg.theme.new_chat_opencode, DEFAULT_NEW_CHAT_OPENCODE_COLOR);
         assert_eq!(cfg.theme.new_chat_path, "$BLUE_HEX");
         assert_eq!(cfg.theme.new_chat_executable, "$BRIGHTGREEN_HEX");
     }
