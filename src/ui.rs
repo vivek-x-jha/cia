@@ -1591,7 +1591,7 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                         .bg(theme.selected)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(harness_color)
+                    Style::default().fg(theme.new_chat_unfocused)
                 };
                 [
                     Span::raw(" "),
@@ -1601,7 +1601,7 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
             .collect::<Vec<_>>();
         frame.render_widget(
             Paragraph::new(Line::from(spans))
-                .block(panel(" New chat harness ", true, theme))
+                .block(panel(" Select Harness ", true, theme))
                 .style(Style::default().fg(theme.foreground)),
             popup,
         );
@@ -1641,6 +1641,7 @@ struct ResolvedTheme {
     preview_codex: Color,
     preview_pi: Color,
     preview_text: Color,
+    new_chat_unfocused: Color,
     new_chat_pi: Color,
     new_chat_claude: Color,
     new_chat_codex: Color,
@@ -1678,6 +1679,7 @@ impl From<&ThemeConfig> for ResolvedTheme {
             preview_codex: color(&value.preview_codex),
             preview_pi: color(&value.preview_pi),
             preview_text: color(&value.preview_text),
+            new_chat_unfocused: color(&value.new_chat_unfocused),
             new_chat_pi: color(&value.new_chat_pi),
             new_chat_claude: color(&value.new_chat_claude),
             new_chat_codex: color(&value.new_chat_codex),

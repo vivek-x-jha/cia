@@ -295,6 +295,7 @@ preview_user = "#0000ff"
 preview_codex = "#00ffff"
 preview_pi = "#00ffff"
 preview_text = "#e6e6e6"
+new_chat_unfocused = "$BRIGHTBLACK_HEX"
 new_chat_pi = "$CYAN_HEX"
 new_chat_claude = "$BRIGHTYELLOW_HEX"
 new_chat_codex = "$BLUE_HEX"
@@ -353,7 +354,8 @@ using the defaults above.
 | `theme.archive_icon` | Color for archived-chat icon in all-chats view; default red (`#ff0000`); can be set to `$RED_HEX` |
 | `theme.preview_user`, `theme.preview_codex`, `theme.preview_pi` | Role label colors in the preview pane |
 | `theme.preview_text` | User and harness message text color in the preview pane |
-| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | New-chat harness picker foreground colors; defaults use `$CYAN_HEX`, `$BRIGHTYELLOW_HEX`, `$BLUE_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
+| `theme.new_chat_unfocused` | New-chat harness picker foreground color for unfocused choices; default `$BRIGHTBLACK_HEX` |
+| `theme.new_chat_pi`, `theme.new_chat_claude`, `theme.new_chat_codex`, `theme.new_chat_cursor`, `theme.new_chat_opencode` | New-chat harness picker foreground colors for the focused choice; defaults use `$CYAN_HEX`, `$BRIGHTYELLOW_HEX`, `$BLUE_HEX`, `$MAGENTA_HEX`, and `$GREEN_HEX` |
 
 ## Data and Safety
 
