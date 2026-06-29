@@ -1,8 +1,8 @@
 [package]
 name = "cia"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2021"
-description = "A terminal dashboard for browsing Codex and Pi chats and switching tmux-managed agents"
+description = "A terminal dashboard for browsing agent chats and switching tmux-managed coding agents"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/vivek-x-jha/cia"

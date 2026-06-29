@@ -31,7 +31,7 @@ use ratatui::{
 
 use crate::{
     agent::{Harness, Message, Thread, PI_HARNESS_ID},
-    config::{state_path, Config, ThemeConfig},
+    config::{state_dir, state_path, Config, ThemeConfig},
     model::{build_projects, rows, Project, Row},
     state::State,
     tmux::{AgentLaunch, Client as TmuxClient, Window},
@@ -75,25 +75,20 @@ enum ClickTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeleteChoice {
     No,
-    Yes,
+    Hide,
+    Delete,
 }
 
 #[derive(Clone, Debug)]
 struct DeletePrompt {
     target: DeleteTarget,
-    yes_selected: bool,
+    choice: DeleteChoice,
 }
 
 #[derive(Clone, Debug)]
 enum DeleteTarget {
-    Project {
-        name: String,
-        cwd: String,
-        threads: Vec<Thread>,
-    },
-    Chat {
-        thread: Thread,
-    },
+    Project { name: String, cwd: String },
+    Chat { thread: Thread },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -277,6 +272,8 @@ impl App {
             });
         }
         self.projects = build_projects(threads, windows, &self.tmux);
+        self.projects
+            .retain(|project| !self.state.is_project_hidden(&project.cwd));
         for cwd in &self.state.project_paths {
             if !self.projects.iter().any(|project| &project.cwd == cwd) {
                 self.projects.push(Project {
@@ -546,7 +543,6 @@ impl App {
                 DeleteTarget::Project {
                     name: project.name.clone(),
                     cwd: project.cwd.clone(),
-                    threads: project.threads.clone(),
                 }
             }
             Focus::Threads | Focus::Preview => {
@@ -561,7 +557,7 @@ impl App {
         };
         self.delete_prompt = Some(DeletePrompt {
             target,
-            yes_selected: false,
+            choice: DeleteChoice::No,
         });
     }
 
@@ -569,9 +565,14 @@ impl App {
         let Some(prompt) = self.delete_prompt.take() else {
             return;
         };
-        let result = match prompt.target {
-            DeleteTarget::Project { cwd, threads, .. } => self.delete_project(&cwd, &threads),
-            DeleteTarget::Chat { thread } => self.delete_chat(&thread),
+        let result = match (prompt.target, prompt.choice) {
+            (_, DeleteChoice::No) => Ok(()),
+            (DeleteTarget::Project { cwd, .. }, DeleteChoice::Hide) => self.hide_project(&cwd),
+            (DeleteTarget::Project { cwd, .. }, DeleteChoice::Delete) => {
+                self.delete_project_from_disk(&cwd)
+            }
+            (DeleteTarget::Chat { thread }, DeleteChoice::Delete) => self.delete_chat(&thread),
+            (DeleteTarget::Chat { .. }, DeleteChoice::Hide) => Ok(()),
         };
         match result {
             Ok(()) => {
@@ -581,12 +582,14 @@ impl App {
         }
     }
 
-    fn delete_project(&mut self, cwd: &str, threads: &[Thread]) -> Result<()> {
+    fn hide_project(&mut self, cwd: &str) -> Result<()> {
+        self.state.hide_project_path(cwd);
+        self.state.save(&self.state_path)
+    }
+
+    fn delete_project_from_disk(&mut self, cwd: &str) -> Result<()> {
         remove_path_from_disk(Path::new(cwd))?;
-        for thread in threads {
-            self.delete_chat_files(thread)?;
-        }
-        self.state.remove_project_path(cwd);
+        self.state.hide_project_path(cwd);
         self.state.save(&self.state_path)
     }
 
@@ -639,7 +642,7 @@ impl App {
             self.status = "Project path cannot be empty".into();
             return;
         }
-        let cwd = expand_user_path(path);
+        let cwd = new_project_path(path);
         if let Err(error) = fs::create_dir_all(&cwd) {
             self.status = format!("failed to create {}: {error}", cwd.display());
             return;
@@ -718,24 +721,30 @@ impl App {
         if self.delete_prompt.is_some() {
             match key.code {
                 KeyCode::Esc => self.delete_prompt = None,
-                KeyCode::Enter => {
-                    if self
-                        .delete_prompt
-                        .as_ref()
-                        .is_some_and(|prompt| prompt.yes_selected)
-                    {
-                        self.confirm_delete();
-                    } else {
-                        self.delete_prompt = None;
+                KeyCode::Enter => self.confirm_delete(),
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if let Some(prompt) = &mut self.delete_prompt {
+                        prompt.choice = previous_delete_choice(prompt.choice, &prompt.target);
                     }
                 }
-                KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => {
+                KeyCode::Right | KeyCode::Char('l') => {
                     if let Some(prompt) = &mut self.delete_prompt {
-                        prompt.yes_selected = !prompt.yes_selected;
+                        prompt.choice = next_delete_choice(prompt.choice, &prompt.target);
                     }
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => self.delete_prompt = None,
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.confirm_delete(),
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if let Some(prompt) = &mut self.delete_prompt {
+                        prompt.choice = default_delete_choice(&prompt.target);
+                    }
+                    self.confirm_delete();
+                }
+                KeyCode::Char('d') | KeyCode::Char('D') => {
+                    if let Some(prompt) = &mut self.delete_prompt {
+                        prompt.choice = DeleteChoice::Delete;
+                    }
+                    self.confirm_delete();
+                }
                 _ => {}
             }
             return;
@@ -962,9 +971,17 @@ impl App {
             return;
         };
         let popup = centered(Rect::new(0, 0, width, height), 76, 8);
-        match delete_choice_at(x, y, popup) {
+        let Some(prompt) = &self.delete_prompt else {
+            return;
+        };
+        match delete_choice_at(x, y, popup, &prompt.target) {
             Some(DeleteChoice::No) => self.delete_prompt = None,
-            Some(DeleteChoice::Yes) => self.confirm_delete(),
+            Some(choice) => {
+                if let Some(prompt) = &mut self.delete_prompt {
+                    prompt.choice = choice;
+                }
+                self.confirm_delete();
+            }
             None => {}
         }
         self.last_click = None;
@@ -1183,10 +1200,17 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
             } else {
                 theme.muted
             };
+            let archive_marker = match row {
+                Row::Thread { thread, .. } if app.show_archived && thread.archived => {
+                    Span::styled(" ", Style::default().fg(theme.archive_icon))
+                }
+                _ => Span::raw(""),
+            };
             ListItem::new(Line::from(vec![
                 marker,
                 Span::styled(format!("{harness} "), Style::default().fg(harness_color)),
                 Span::raw(row.title()),
+                archive_marker,
             ]))
         })
         .collect();
@@ -1364,11 +1388,11 @@ fn draw_delete_prompt(
     let popup = centered(area, 76, 8);
     frame.render_widget(Clear, popup);
     let (title, warning) = match &prompt.target {
-        DeleteTarget::Project { name, cwd, .. } => (
-            format!("Delete project {name}?"),
+        DeleteTarget::Project { name, cwd } => (
+            format!("Remove project {name}?"),
             Line::from(vec![
                 Span::styled(
-                    "Will remove from disk: ",
+                    "Hide removes from view; Delete removes from disk: ",
                     Style::default().fg(theme.foreground),
                 ),
                 Span::styled(
@@ -1385,32 +1409,14 @@ fn draw_delete_prompt(
             ),
         ),
     };
-    let no_style = if !prompt.yes_selected {
-        Style::default()
-            .fg(theme.foreground)
-            .bg(theme.selected)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.muted)
-    };
-    let yes_style = if prompt.yes_selected {
-        Style::default()
-            .fg(theme.foreground)
-            .bg(theme.error)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.muted)
-    };
+    let no_style = delete_choice_style(prompt.choice, DeleteChoice::No, theme);
+    let hide_style = delete_choice_style(prompt.choice, DeleteChoice::Hide, theme);
+    let delete_style = delete_choice_style(prompt.choice, DeleteChoice::Delete, theme);
     let text = Text::from(vec![
         Line::styled(title, Style::default().fg(theme.error)),
         warning,
         Line::from(""),
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled(" No ", no_style),
-            Span::raw("  "),
-            Span::styled(" Yes ", yes_style),
-        ]),
+        delete_choice_line(prompt, no_style, hide_style, delete_style),
     ]);
     frame.render_widget(
         Paragraph::new(text)
@@ -1418,6 +1424,50 @@ fn draw_delete_prompt(
             .style(Style::default().fg(theme.foreground)),
         popup,
     );
+}
+
+fn delete_choice_style(
+    selected: DeleteChoice,
+    choice: DeleteChoice,
+    theme: ResolvedTheme,
+) -> Style {
+    if selected == choice {
+        let bg = if choice == DeleteChoice::Delete {
+            theme.error
+        } else {
+            theme.selected
+        };
+        Style::default()
+            .fg(theme.foreground)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.muted)
+    }
+}
+
+fn delete_choice_line(
+    prompt: &DeletePrompt,
+    no_style: Style,
+    hide_style: Style,
+    delete_style: Style,
+) -> Line<'static> {
+    match prompt.target {
+        DeleteTarget::Project { .. } => Line::from(vec![
+            Span::raw("  "),
+            Span::styled(" No ", no_style),
+            Span::raw("  "),
+            Span::styled(" Hide ", hide_style),
+            Span::raw("  "),
+            Span::styled(" Delete ", delete_style),
+        ]),
+        DeleteTarget::Chat { .. } => Line::from(vec![
+            Span::raw("  "),
+            Span::styled(" No ", no_style),
+            Span::raw("  "),
+            Span::styled(" Delete ", delete_style),
+        ]),
+    }
 }
 
 fn draw_new_project_prompt(
@@ -1455,7 +1505,7 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                 };
                 [
                     Span::raw(" "),
-                    Span::styled(format!(" {} ", harness.label), style),
+                    Span::styled(format!(" {} {} ", harness.marker, harness.label), style),
                 ]
             })
             .collect::<Vec<_>>();
@@ -1491,6 +1541,7 @@ struct ResolvedTheme {
     status_unarchive: Color,
     status_delete: Color,
     status_help: Color,
+    archive_icon: Color,
     preview_user: Color,
     preview_codex: Color,
     preview_pi: Color,
@@ -1517,6 +1568,7 @@ impl From<&ThemeConfig> for ResolvedTheme {
             status_unarchive: color(&value.status_unarchive),
             status_delete: color(&value.status_delete),
             status_help: color(&value.status_help),
+            archive_icon: color(&value.archive_icon),
             preview_user: color(&value.preview_user),
             preview_codex: color(&value.preview_codex),
             preview_pi: color(&value.preview_pi),
@@ -1614,6 +1666,19 @@ fn expand_user_path(path: &str) -> PathBuf {
         return home_dir().join(rest);
     }
     PathBuf::from(path)
+}
+
+fn new_project_path(path: &str) -> PathBuf {
+    let expanded = expand_user_path(path);
+    if is_bare_project_name(&expanded) {
+        state_dir().join(&expanded)
+    } else {
+        expanded
+    }
+}
+
+fn is_bare_project_name(path: &Path) -> bool {
+    path.is_relative() && path.components().count() == 1
 }
 
 fn remove_path_from_disk(path: &Path) -> Result<()> {
@@ -1801,7 +1866,7 @@ fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Optio
     let mut cursor = popup.x.saturating_add(1);
     for (index, harness) in harnesses.iter().enumerate() {
         cursor = cursor.saturating_add(1);
-        let width = (harness.label.chars().count() + 2) as u16;
+        let width = (harness.marker.chars().count() + harness.label.chars().count() + 3) as u16;
         let end = cursor.saturating_add(width);
         if x >= cursor && x < end {
             return Some(index);
@@ -1811,7 +1876,41 @@ fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Optio
     None
 }
 
-fn delete_choice_at(x: u16, y: u16, popup: Rect) -> Option<DeleteChoice> {
+fn delete_choices(target: &DeleteTarget) -> &'static [DeleteChoice] {
+    match target {
+        DeleteTarget::Project { .. } => {
+            &[DeleteChoice::No, DeleteChoice::Hide, DeleteChoice::Delete]
+        }
+        DeleteTarget::Chat { .. } => &[DeleteChoice::No, DeleteChoice::Delete],
+    }
+}
+
+fn default_delete_choice(target: &DeleteTarget) -> DeleteChoice {
+    match target {
+        DeleteTarget::Project { .. } => DeleteChoice::Hide,
+        DeleteTarget::Chat { .. } => DeleteChoice::Delete,
+    }
+}
+
+fn previous_delete_choice(choice: DeleteChoice, target: &DeleteTarget) -> DeleteChoice {
+    let choices = delete_choices(target);
+    let index = choices
+        .iter()
+        .position(|value| *value == choice)
+        .unwrap_or(0);
+    choices[move_index(index, choices.len(), -1)]
+}
+
+fn next_delete_choice(choice: DeleteChoice, target: &DeleteTarget) -> DeleteChoice {
+    let choices = delete_choices(target);
+    let index = choices
+        .iter()
+        .position(|value| *value == choice)
+        .unwrap_or(0);
+    choices[move_index(index, choices.len(), 1)]
+}
+
+fn delete_choice_at(x: u16, y: u16, popup: Rect, target: &DeleteTarget) -> Option<DeleteChoice> {
     if y != popup.y.saturating_add(4) {
         return None;
     }
@@ -1820,10 +1919,22 @@ fn delete_choice_at(x: u16, y: u16, popup: Rect) -> Option<DeleteChoice> {
     if x >= no_start && x < no_end {
         return Some(DeleteChoice::No);
     }
-    let yes_start = popup.x.saturating_add(9);
-    let yes_end = yes_start.saturating_add(5);
-    if x >= yes_start && x < yes_end {
-        return Some(DeleteChoice::Yes);
+    let second_start = popup.x.saturating_add(9);
+    if matches!(target, DeleteTarget::Chat { .. }) {
+        let second_end = second_start.saturating_add(8);
+        if x >= second_start && x < second_end {
+            return Some(DeleteChoice::Delete);
+        }
+        return None;
+    }
+    let hide_end = second_start.saturating_add(6);
+    if x >= second_start && x < hide_end {
+        return Some(DeleteChoice::Hide);
+    }
+    let delete_start = popup.x.saturating_add(17);
+    let delete_end = delete_start.saturating_add(8);
+    if x >= delete_start && x < delete_end {
+        return Some(DeleteChoice::Delete);
     }
     None
 }
@@ -1869,9 +1980,43 @@ mod tests {
     #[test]
     fn finds_delete_prompt_mouse_choices() {
         let popup = Rect::new(10, 5, 76, 8);
-        assert_eq!(delete_choice_at(13, 9, popup), Some(DeleteChoice::No));
-        assert_eq!(delete_choice_at(19, 9, popup), Some(DeleteChoice::Yes));
-        assert_eq!(delete_choice_at(18, 9, popup), None);
-        assert_eq!(delete_choice_at(13, 8, popup), None);
+        let project = DeleteTarget::Project {
+            name: "repo".into(),
+            cwd: "/tmp/repo".into(),
+        };
+        let chat = DeleteTarget::Chat {
+            thread: Thread {
+                harness_id: "codex".into(),
+                id: "thread".into(),
+                name: Some("chat".into()),
+                preview: String::new(),
+                cwd: "/tmp/repo".into(),
+                created_at: 0,
+                updated_at: 0,
+                recency_at: None,
+                source: serde_json::Value::Null,
+                git_info: None,
+                archived: false,
+                path: None,
+            },
+        };
+        assert_eq!(
+            delete_choice_at(13, 9, popup, &project),
+            Some(DeleteChoice::No)
+        );
+        assert_eq!(
+            delete_choice_at(19, 9, popup, &project),
+            Some(DeleteChoice::Hide)
+        );
+        assert_eq!(
+            delete_choice_at(28, 9, popup, &project),
+            Some(DeleteChoice::Delete)
+        );
+        assert_eq!(
+            delete_choice_at(19, 9, popup, &chat),
+            Some(DeleteChoice::Delete)
+        );
+        assert_eq!(delete_choice_at(18, 9, popup, &project), None);
+        assert_eq!(delete_choice_at(13, 8, popup, &project), None);
     }
 }

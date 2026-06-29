@@ -33,7 +33,7 @@ enum Commands {
         /// Search archived threads instead of active threads
         #[arg(long)]
         archived: bool,
-        /// Harness to search: codex, pi, or all
+        /// Harness to search: pi, codex, claude, opencode, or all
         #[arg(long, default_value = "all")]
         harness: String,
     },
@@ -233,7 +233,8 @@ fn run_thread(
     let tmux = tmux::Client::new(tmux_config.clone());
     let kind = match harness_id {
         agent::PI_HARNESS_ID => agent::HarnessKind::Pi,
-        _ => agent::HarnessKind::Codex,
+        agent::CODEX_HARNESS_ID => agent::HarnessKind::Codex,
+        _ => agent::HarnessKind::Basic,
     };
     let existing_id = if kind == agent::HarnessKind::Codex && thread_id.is_none() {
         let mut client = codex::Client::start(agent_command)?;
@@ -309,6 +310,7 @@ fn agent_args(
                 args.extend(["--session-dir".into(), session_dir.into()]);
             }
         }
+        agent::HarnessKind::Basic => {}
     }
     args
 }
@@ -386,5 +388,10 @@ mod tests {
             ),
             vec!["--name", "Named chat", "--session-dir", "/tmp/pi sessions"]
         );
+    }
+
+    #[test]
+    fn launch_only_harnesses_use_configured_command_without_args() {
+        assert!(agent_args(agent::HarnessKind::Basic, None, "/repo", "Chat", None).is_empty());
     }
 }

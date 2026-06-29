@@ -8,6 +8,10 @@ pub const CODEX_HARNESS_ID: &str = "codex";
 pub const CODEX_HARNESS_LABEL: &str = "Codex";
 pub const PI_HARNESS_ID: &str = "pi";
 pub const PI_HARNESS_LABEL: &str = "Pi";
+pub const CLAUDE_HARNESS_ID: &str = "claude";
+pub const CLAUDE_HARNESS_LABEL: &str = "Claude Code";
+pub const OPENCODE_HARNESS_ID: &str = "opencode";
+pub const OPENCODE_HARNESS_LABEL: &str = "OpenCode";
 pub const DEFAULT_HARNESS_ID: &str = CODEX_HARNESS_ID;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -98,17 +102,43 @@ pub struct Harness {
 pub enum HarnessKind {
     Codex,
     Pi,
+    Basic,
 }
 
 impl Harness {
     pub fn start_all(config: &Config) -> Vec<Result<Self>> {
-        let mut harnesses = vec![Self::start_codex(config)];
+        let mut harnesses = Vec::new();
         if config
             .pi
             .enabled
             .unwrap_or_else(|| command_exists(&config.pi.command))
         {
             harnesses.push(Self::start_pi(config));
+        }
+        harnesses.push(Self::start_codex(config));
+        if config
+            .claude
+            .enabled
+            .unwrap_or_else(|| command_exists(&config.claude.command))
+        {
+            harnesses.push(Ok(Self::basic(
+                CLAUDE_HARNESS_ID,
+                CLAUDE_HARNESS_LABEL,
+                &config.claude.icon,
+                &config.claude.command,
+            )));
+        }
+        if config
+            .opencode
+            .enabled
+            .unwrap_or_else(|| command_exists(&config.opencode.command))
+        {
+            harnesses.push(Ok(Self::basic(
+                OPENCODE_HARNESS_ID,
+                OPENCODE_HARNESS_LABEL,
+                &config.opencode.icon,
+                &config.opencode.command,
+            )));
         }
         harnesses
     }
@@ -117,7 +147,7 @@ impl Harness {
         Ok(Self {
             id: CODEX_HARNESS_ID.into(),
             label: CODEX_HARNESS_LABEL.into(),
-            marker: "Codex".into(),
+            marker: config.codex.icon.clone(),
             command: config.codex.command.clone(),
             client: Box::new(codex::Client::start(&config.codex.command)?),
         })
@@ -127,10 +157,20 @@ impl Harness {
         Ok(Self {
             id: PI_HARNESS_ID.into(),
             label: PI_HARNESS_LABEL.into(),
-            marker: "π".into(),
+            marker: config.pi.icon.clone(),
             command: config.pi.command.clone(),
             client: Box::new(pi::Client::new(config.pi.session_dir.clone())),
         })
+    }
+
+    fn basic(id: &str, label: &str, marker: &str, command: &str) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            marker: marker.into(),
+            command: command.into(),
+            client: Box::new(BasicClient),
+        }
     }
 
     pub fn list_threads(&mut self, archived: bool) -> Result<Vec<Thread>> {
@@ -143,6 +183,18 @@ impl Harness {
 
     pub fn read_messages(&mut self, thread_id: &str, turns: usize) -> Result<Vec<Message>> {
         self.client.read_messages(thread_id, turns)
+    }
+}
+
+struct BasicClient;
+
+impl Client for BasicClient {
+    fn list_threads(&mut self, _archived: bool) -> Result<Vec<Thread>> {
+        Ok(Vec::new())
+    }
+
+    fn read_messages(&mut self, _thread_id: &str, _turns: usize) -> Result<Vec<Message>> {
+        Ok(Vec::new())
     }
 }
 

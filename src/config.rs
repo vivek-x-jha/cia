@@ -8,6 +8,8 @@ use serde::Deserialize;
 pub struct Config {
     pub codex: CodexConfig,
     pub pi: PiConfig,
+    pub claude: ClaudeConfig,
+    pub opencode: OpencodeConfig,
     pub tmux: TmuxConfig,
     pub ui: UiConfig,
     pub theme: ThemeConfig,
@@ -17,6 +19,7 @@ pub struct Config {
 #[serde(default, deny_unknown_fields)]
 pub struct CodexConfig {
     pub command: String,
+    pub icon: String,
     pub transcript_turns: usize,
 }
 
@@ -24,7 +27,24 @@ pub struct CodexConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct PiConfig {
     pub command: String,
+    pub icon: String,
     pub session_dir: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClaudeConfig {
+    pub command: String,
+    pub icon: String,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpencodeConfig {
+    pub command: String,
+    pub icon: String,
     pub enabled: Option<bool>,
 }
 
@@ -64,6 +84,7 @@ pub struct ThemeConfig {
     pub status_archive_action: String,
     pub status_unarchive: String,
     pub status_delete: String,
+    pub archive_icon: String,
     pub status_help: String,
     pub preview_user: String,
     pub preview_codex: String,
@@ -75,6 +96,7 @@ impl Default for CodexConfig {
     fn default() -> Self {
         Self {
             command: "codex".into(),
+            icon: "󰚩".into(),
             transcript_turns: 3,
         }
     }
@@ -84,7 +106,28 @@ impl Default for PiConfig {
     fn default() -> Self {
         Self {
             command: "pi".into(),
+            icon: "π".into(),
             session_dir: None,
+            enabled: None,
+        }
+    }
+}
+
+impl Default for ClaudeConfig {
+    fn default() -> Self {
+        Self {
+            command: "claude".into(),
+            icon: "✳".into(),
+            enabled: None,
+        }
+    }
+}
+
+impl Default for OpencodeConfig {
+    fn default() -> Self {
+        Self {
+            command: "opencode".into(),
+            icon: "󰘦".into(),
             enabled: None,
         }
     }
@@ -94,7 +137,12 @@ impl Default for TmuxConfig {
     fn default() -> Self {
         Self {
             command: "tmux".into(),
-            agent_commands: vec!["codex".into(), "pi".into()],
+            agent_commands: vec![
+                "pi".into(),
+                "codex".into(),
+                "claude".into(),
+                "opencode".into(),
+            ],
             agent_window_names: vec!["agents".into()],
             new_window_prefix: "agent:".into(),
         }
@@ -122,6 +170,7 @@ impl Default for ThemeConfig {
             status_archive_action: "#e06c75".into(),
             status_unarchive: "#c678dd".into(),
             status_delete: "#e06c75".into(),
+            archive_icon: "#ff0000".into(),
             status_help: "#e5c07b".into(),
             preview_user: "#0000ff".into(),
             preview_codex: "#00ffff".into(),
@@ -138,11 +187,15 @@ pub fn config_path() -> PathBuf {
         .join("cia/config.toml")
 }
 
-pub fn state_path() -> PathBuf {
+pub fn state_dir() -> PathBuf {
     env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home_dir().join(".local/state"))
-        .join("cia/state.json")
+        .join("cia")
+}
+
+pub fn state_path() -> PathBuf {
+    state_dir().join("state.json")
 }
 
 fn home_dir() -> PathBuf {
@@ -167,7 +220,13 @@ impl Config {
 
     fn expand_env(&mut self) {
         self.codex.command = expand_env_vars(&self.codex.command);
+        self.codex.icon = expand_env_vars(&self.codex.icon);
         self.pi.command = expand_env_vars(&self.pi.command);
+        self.pi.icon = expand_env_vars(&self.pi.icon);
+        self.claude.command = expand_env_vars(&self.claude.command);
+        self.claude.icon = expand_env_vars(&self.claude.icon);
+        self.opencode.command = expand_env_vars(&self.opencode.command);
+        self.opencode.icon = expand_env_vars(&self.opencode.icon);
         self.pi.session_dir = self
             .pi
             .session_dir
@@ -211,6 +270,7 @@ impl ThemeConfig {
         self.status_archive_action = expand_env_vars(&self.status_archive_action);
         self.status_unarchive = expand_env_vars(&self.status_unarchive);
         self.status_delete = expand_env_vars(&self.status_delete);
+        self.archive_icon = expand_env_vars(&self.archive_icon);
         self.status_help = expand_env_vars(&self.status_help);
         self.preview_user = expand_env_vars(&self.preview_user);
         self.preview_codex = expand_env_vars(&self.preview_codex);
@@ -271,7 +331,14 @@ mod tests {
         assert!(cfg.ui.archived_default);
         assert_eq!(cfg.codex.command, "codex");
         assert_eq!(cfg.pi.command, "pi");
-        assert_eq!(cfg.tmux.agent_commands, vec!["codex", "pi"]);
+        assert_eq!(cfg.claude.command, "claude");
+        assert_eq!(cfg.claude.icon, "✳");
+        assert_eq!(cfg.opencode.command, "opencode");
+        assert_eq!(cfg.opencode.icon, "󰘦");
+        assert_eq!(
+            cfg.tmux.agent_commands,
+            vec!["pi", "codex", "claude", "opencode"]
+        );
     }
 
     #[test]

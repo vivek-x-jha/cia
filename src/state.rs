@@ -31,6 +31,8 @@ pub struct State {
     pub archived_threads: Vec<ArchivedThread>,
     #[serde(default)]
     pub project_paths: Vec<String>,
+    #[serde(default)]
+    pub hidden_project_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,6 +50,7 @@ impl Default for State {
             mappings: Vec::new(),
             archived_threads: Vec::new(),
             project_paths: Vec::new(),
+            hidden_project_paths: Vec::new(),
         }
     }
 }
@@ -115,13 +118,24 @@ impl State {
     }
 
     pub fn add_project_path(&mut self, cwd: String) {
+        self.hidden_project_paths.retain(|path| path != &cwd);
         if !self.project_paths.iter().any(|path| path == &cwd) {
             self.project_paths.push(cwd);
         }
     }
 
-    pub fn remove_project_path(&mut self, cwd: &str) {
+    pub fn hide_project_path(&mut self, cwd: &str) {
         self.project_paths.retain(|path| path != cwd);
+        if !self.hidden_project_paths.iter().any(|path| path == cwd) {
+            self.hidden_project_paths.push(cwd.to_owned());
+        }
+        if self.last_project.as_deref() == Some(cwd) {
+            self.last_project = None;
+        }
+    }
+
+    pub fn is_project_hidden(&self, cwd: &str) -> bool {
+        self.hidden_project_paths.iter().any(|path| path == cwd)
     }
 
     pub fn record(&mut self, harness_id: &str, thread_id: &str, window: &Window) {
