@@ -516,7 +516,7 @@ impl App {
         self.new_chat_harness_index = self
             .harnesses
             .iter()
-            .position(|harness| harness.id == PI_HARNESS_ID)
+            .position(|harness| harness.id == self.config.ui.default_harness)
             .unwrap_or(0);
         self.new_chat_picking_harness = self.harnesses.len() > 1;
         self.new_chat_mode = true;
@@ -1635,36 +1635,38 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
             .enumerate()
             .map(|(index, harness)| {
                 let harness_color = new_chat_harness_color(&harness.id, theme);
-                let style = if index == app.new_chat_harness_index {
+                let selected = index == app.new_chat_harness_index;
+                let harness_style = if selected {
                     Style::default()
                         .fg(harness_color)
                         .bg(theme.selected)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.new_chat_unfocused)
+                    Style::default().fg(harness_color)
                 };
+                let unfocused_style = Style::default().fg(theme.new_chat_unfocused);
                 let command_path = harness
                     .command_path
                     .as_deref()
                     .map(display_path)
                     .unwrap_or_else(|| "-".into());
                 let (path_prefix, executable) = split_executable_path(&command_path);
-                let path_style = if index == app.new_chat_harness_index {
+                let path_style = if selected {
                     Style::default().fg(theme.new_chat_path).bg(theme.selected)
                 } else {
-                    style
+                    unfocused_style
                 };
-                let executable_style = if index == app.new_chat_harness_index {
+                let executable_style = if selected {
                     Style::default()
                         .fg(theme.new_chat_executable)
                         .bg(theme.selected)
                 } else {
-                    style
+                    unfocused_style
                 };
                 Line::from(vec![
                     Span::styled(
                         format!(" {:<2} {:<14}", harness.marker, harness.label),
-                        style,
+                        harness_style,
                     ),
                     Span::styled(format!(" {path_prefix}"), path_style),
                     Span::styled(format!("{executable} "), executable_style),

@@ -76,6 +76,7 @@ pub struct TmuxConfig {
 pub struct UiConfig {
     pub archived_default: bool,
     pub archive_icon: String,
+    pub default_harness: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -199,6 +200,7 @@ impl Default for UiConfig {
         Self {
             archived_default: false,
             archive_icon: "".into(),
+            default_harness: "pi".into(),
         }
     }
 }
@@ -324,6 +326,7 @@ impl Config {
             .collect();
         self.tmux.new_window_prefix = expand_env_vars(&self.tmux.new_window_prefix);
         self.ui.archive_icon = expand_env_vars(&self.ui.archive_icon);
+        self.ui.default_harness = expand_env_vars(&self.ui.default_harness);
         self.theme.expand_env();
     }
 }
@@ -430,6 +433,7 @@ mod tests {
         assert_eq!(cfg.cursor.icon, "󰋙");
         assert_eq!(cfg.opencode.command, "opencode");
         assert_eq!(cfg.ui.archive_icon, "");
+        assert_eq!(cfg.ui.default_harness, "pi");
         assert_eq!(cfg.opencode.icon, "");
         assert_eq!(
             cfg.tmux.agent_commands,

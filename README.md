@@ -149,7 +149,7 @@ under `[theme]`; harness icons are configurable under each harness section and
 are shown in the chats list, preview role labels, and new-chat picker. Harness
 icon colors in chats, previews, and the new-chat picker share the
 `theme.new_chat_*` harness color settings.
-The new-chat harness picker is ordered Pi, Claude Code, Codex, Cursor, OpenCode.
+The new-chat harness picker is ordered alphabetically by harness label: Claude Code, Codex, Cursor, OpenCode, Pi. The default selected harness is configurable and defaults to Pi.
 
 ## How Sessions Work
 
@@ -267,6 +267,7 @@ new_window_prefix = "agent:"
 [ui]
 archived_default = false
 archive_icon = ""
+default_harness = "pi"
 
 [theme]
 background = "#101218"
@@ -316,7 +317,7 @@ icon values are plain strings, so you can replace them with ASCII if your
 terminal font lacks a glyph. Harness labels are plain strings too, so the
 new-chat text segments are customizable from config. The new-chat harness picker
 is vertical and includes a CLI path column resolved with `command -v` for each
-harness; missing CLI tools display `-` and selecting them shows a not-found error. This includes `ui.archive_icon`, the glyph shown beside archived chats. You can override only
+harness; missing CLI tools display `-` and selecting them shows a not-found error. Harness icon/label colors come from `theme.new_chat_*`, including unfocused rows; the CLI path column uses the unfocused/path/executable colors. This includes `ui.archive_icon`, the glyph shown beside archived chats. You can override only
 the colors, icons, labels, and commands you care about; unset keys continue
 using the defaults above.
 
@@ -331,7 +332,7 @@ using the defaults above.
 | `pi.command` | Pi executable or wrapper used for Pi chats; default `pi` |
 | `pi.icon` | Icon shown in new-chat harness picker and previews; default `π` |
 | `pi.label` | Label shown in harness text segments; default `Pi` |
-| New-chat harness order | Harness text segments are shown as Pi, Claude Code, Codex, Cursor, OpenCode unless explicitly disabled |
+| New-chat harness order | Harness text segments are shown alphabetically as Claude Code, Codex, Cursor, OpenCode, Pi unless explicitly disabled |
 | `pi.session_dir` | Optional override for Pi session lookup; defaults to `$PI_CODING_AGENT_SESSION_DIR`, then `$PI_CODING_AGENT_DIR/sessions`, then `~/.pi/agent/sessions` |
 | `pi.enabled` | Optional explicit Pi enable/disable; by default Pi is shown even when `pi` is missing from `$PATH` |
 | `claude.command` | Claude Code executable or wrapper used for launch-only panes; default `claude` |
@@ -352,6 +353,7 @@ using the defaults above.
 | `tmux.new_window_prefix` | Legacy managed-window prefix retained for compatibility |
 | `ui.archived_default` | Show all chats, including archived chats, when CIA starts |
 | `ui.archive_icon` | Icon shown beside archived chats in all-chats view; default `` |
+| `ui.default_harness` | Harness id initially selected in the new-chat harness picker; default `pi` |
 | `theme.background`, `theme.surface` | Legacy surface colors retained for configuration compatibility |
 | `theme.foreground`, `theme.muted`, `theme.accent`, `theme.selected`, `theme.success`, `theme.warning`, `theme.error` | Base TUI colors; status errors use `theme.error`, default `$BRIGHTRED_HEX` |
 | `theme.title_focused`, `theme.title_unfocused` | Focused and unfocused pane title colors; defaults match tmux bright green (`#d2fd9d`) and bright black (`#5c617d`) |

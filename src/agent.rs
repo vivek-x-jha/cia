@@ -107,9 +107,6 @@ pub enum HarnessKind {
 impl Harness {
     pub fn start_all(config: &Config) -> Vec<Result<Self>> {
         let mut harnesses = Vec::new();
-        if config.pi.enabled.unwrap_or(true) {
-            harnesses.push(Self::start_pi(config));
-        }
         if config.claude.enabled.unwrap_or(true) {
             harnesses.push(Ok(Self::basic(
                 CLAUDE_HARNESS_ID,
@@ -134,6 +131,9 @@ impl Harness {
                 &config.opencode.icon,
                 &config.opencode.command,
             )));
+        }
+        if config.pi.enabled.unwrap_or(true) {
+            harnesses.push(Self::start_pi(config));
         }
         harnesses
     }
