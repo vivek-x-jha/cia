@@ -22,7 +22,7 @@ To manually evaluate UI or backend behavior from the current working tree, run b
 zsh -lc 'cargo run'
 ```
 
-If the behavior is acceptable, update the installed binary:
+After successful automated checks, update the installed binary unless the user explicitly asks not to. CIA is normally exercised through the installed `cia` executable, so this verifies the local release build and makes the change visible in normal use:
 
 ```sh
 zsh -lc 'cargo install --path .'

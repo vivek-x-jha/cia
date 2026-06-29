@@ -1,6 +1,6 @@
 [package]
 name = "cia"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "A terminal dashboard for browsing agent chats and switching tmux-managed coding agents"
 license = "MIT"
