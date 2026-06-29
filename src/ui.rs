@@ -44,6 +44,7 @@ use crate::{
 enum Focus {
     Projects,
     Threads,
+    Status,
     Preview,
 }
 
@@ -66,12 +67,14 @@ struct PaneAreas {
     projects: Rect,
     threads: Rect,
     preview: Rect,
+    details: Rect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ClickTarget {
     Project(usize),
     Thread(usize),
+    Status,
     Preview,
 }
 
@@ -91,7 +94,7 @@ struct DeletePrompt {
 #[derive(Clone, Debug)]
 enum DeleteTarget {
     Project { name: String, cwd: String },
-    Chat { thread: Thread },
+    Chat { thread: Box<Thread> },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -128,6 +131,7 @@ pub struct App {
     new_chat_name: String,
     preview: Vec<Message>,
     preview_scroll: u16,
+    status_scroll: u16,
     status: String,
     show_help: bool,
     delete_prompt: Option<DeletePrompt>,
@@ -186,6 +190,7 @@ impl App {
             new_chat_name: String::new(),
             preview: Vec::new(),
             preview_scroll: 0,
+            status_scroll: 0,
             status: String::new(),
             show_help: false,
             delete_prompt: None,
@@ -390,6 +395,7 @@ impl App {
     fn load_preview(&mut self) {
         self.preview.clear();
         self.preview_scroll = 0;
+        self.status_scroll = 0;
         let row = self.current_rows().get(self.row_index).cloned();
         if let Some(Row::Thread { thread, .. }) = row {
             let turns = self.config.codex.transcript_turns;
@@ -407,7 +413,7 @@ impl App {
     }
 
     fn select_next(&mut self, delta: isize) {
-        match self.focus {
+        let selection_changed = match self.focus {
             Focus::Projects => {
                 let visible = self.visible_project_indices();
                 let position = visible
@@ -419,27 +425,66 @@ impl App {
                     .copied()
                     .unwrap_or(0);
                 self.row_index = 0;
+                true
             }
             Focus::Threads => {
                 self.row_index = move_index(self.row_index, self.current_rows().len(), delta);
+                true
             }
-            Focus::Preview => {}
+            Focus::Status => {
+                self.scroll_status_details(delta);
+                false
+            }
+            Focus::Preview => false,
+        };
+        if selection_changed {
+            self.load_preview();
         }
-        self.load_preview();
     }
 
     fn scroll_preview(&mut self, delta: isize) {
-        self.preview_scroll = if delta.is_negative() {
-            self.preview_scroll
-                .saturating_add(delta.unsigned_abs() as u16)
-        } else {
-            self.preview_scroll.saturating_sub(delta as u16)
-        };
+        self.preview_scroll =
+            scrolled_from_bottom(self.preview_scroll, delta).min(self.max_preview_scroll());
         self.focus = Focus::Preview;
     }
 
+    fn scroll_status_details(&mut self, delta: isize) {
+        self.status_scroll = scrolled(self.status_scroll, delta).min(self.max_status_scroll());
+        self.focus = Focus::Status;
+    }
+
+    fn max_status_scroll(&self) -> u16 {
+        let Ok((width, height)) = terminal_size() else {
+            return 0;
+        };
+        let area = pane_areas(Rect::new(0, 0, width, height)).details;
+        let inner = status_inner_area(area);
+        let theme = ResolvedTheme::from(&self.config.theme);
+        let content = status_details_content(self, theme);
+        wrapped_text_height(&content, inner.width).saturating_sub(inner.height as usize) as u16
+    }
+
+    fn max_preview_scroll(&self) -> u16 {
+        let Ok((width, height)) = terminal_size() else {
+            return 0;
+        };
+        let area = pane_areas(Rect::new(0, 0, width, height)).preview;
+        let theme = ResolvedTheme::from(&self.config.theme);
+        let (header, body) = preview_content(self, theme);
+        let body_area = preview_body_area(area, &header);
+        wrapped_text_height(&body, body_area.width).saturating_sub(body_area.height as usize) as u16
+    }
+
+    fn scroll_focused(&mut self, delta: isize) {
+        if self.focus == Focus::Status {
+            self.scroll_status_details(delta);
+        } else {
+            self.scroll_preview(delta);
+        }
+    }
+
     fn select_boundary(&mut self, last: bool) {
-        match self.focus {
+        let selection_changed = match self.focus {
             Focus::Projects => {
                 let visible = self.visible_project_indices();
                 self.project_index = if last {
@@ -448,6 +493,7 @@ impl App {
                     visible.first().copied().unwrap_or(0)
                 };
                 self.row_index = 0;
+                true
             }
             Focus::Threads => {
                 self.row_index = if last {
@@ -455,10 +501,13 @@ impl App {
                 } else {
                     0
                 };
+                true
             }
-            Focus::Preview => {}
+            Focus::Status | Focus::Preview => false,
+        };
+        if selection_changed {
+            self.load_preview();
         }
-        self.load_preview();
     }
 
     fn activate(&mut self) {
@@ -581,14 +630,14 @@ impl App {
                     cwd: project.cwd.clone(),
                 }
             }
-            Focus::Threads | Focus::Preview => {
+            Focus::Threads | Focus::Status | Focus::Preview => {
                 let Some(Row::Thread { thread, .. }) =
                     self.current_rows().get(self.row_index).cloned()
                 else {
                     self.status = "Select a saved chat first".into();
                     return;
                 };
-                DeleteTarget::Chat { thread: *thread }
+                DeleteTarget::Chat { thread }
             }
         };
         self.delete_prompt = Some(DeletePrompt {
@@ -925,10 +974,10 @@ impl App {
                 self.select_next(-1)
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.scroll_preview(8)
+                self.scroll_focused(8)
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.scroll_preview(-8)
+                self.scroll_focused(-8)
             }
             KeyCode::Char('N') => self.begin_new_project(),
             KeyCode::Char('n') => self.begin_new_thread(),
@@ -952,8 +1001,20 @@ impl App {
         };
         let areas = pane_areas(Rect::new(0, 0, width, height));
         match mouse.kind {
-            MouseEventKind::ScrollDown => self.scroll_preview(3),
-            MouseEventKind::ScrollUp => self.scroll_preview(-3),
+            MouseEventKind::ScrollDown => {
+                if contains(areas.details, mouse.column, mouse.row) {
+                    self.scroll_status_details(3);
+                } else {
+                    self.scroll_preview(3);
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if contains(areas.details, mouse.column, mouse.row) {
+                    self.scroll_status_details(-3);
+                } else {
+                    self.scroll_preview(-3);
+                }
+            }
             MouseEventKind::Down(_) => self.handle_click(mouse.column, mouse.row, areas),
             _ => {}
         }
@@ -1017,6 +1078,11 @@ impl App {
                     }
                 }
             }
+            return;
+        }
+        if contains(areas.details, x, y) {
+            self.focus = Focus::Status;
+            self.register_click(ClickTarget::Status);
             return;
         }
         if contains(areas.preview, x, y) {
@@ -1117,15 +1183,12 @@ pub fn run(mut app: App) -> Result<()> {
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = ResolvedTheme::from(&app.config.theme);
     let area = frame.area();
-    frame.render_widget(
-        Block::default().style(Style::default().bg(theme.background)),
-        area,
-    );
     let areas = pane_areas(area);
     draw_status_bar(frame, areas.status, app, theme);
     draw_projects(frame, areas.projects, app, theme);
     draw_threads(frame, areas.threads, app, theme);
     draw_preview(frame, areas.preview, app, theme);
+    draw_status_details(frame, areas.details, app, theme);
     if app.show_help {
         draw_help(frame, area, theme);
     }
@@ -1143,25 +1206,29 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
 fn pane_areas(area: Rect) -> PaneAreas {
     let outer = Layout::vertical([Constraint::Length(1), Constraint::Min(5)]).split(area);
     let panes = if area.width >= 100 {
-        let rows = Layout::vertical([Constraint::Percentage(36), Constraint::Percentage(64)])
+        let rows = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer[1]);
-        let top = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+        let top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(rows[0]);
-        [top[0], top[1], rows[1]]
+        let bottom = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(rows[1]);
+        [top[0], top[1], bottom[1], bottom[0]]
     } else {
         let panes = Layout::vertical([
-            Constraint::Percentage(25),
-            Constraint::Percentage(35),
-            Constraint::Percentage(40),
+            Constraint::Percentage(22),
+            Constraint::Percentage(28),
+            Constraint::Percentage(20),
+            Constraint::Percentage(30),
         ])
         .split(outer[1]);
-        [panes[0], panes[1], panes[2]]
+        [panes[0], panes[1], panes[3], panes[2]]
     };
     PaneAreas {
         status: outer[0],
         projects: panes[0],
         threads: panes[1],
         preview: panes[2],
+        details: panes[3],
     }
 }
 
@@ -1199,7 +1266,7 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
             Style::default().fg(status_color(action, theme)),
         ));
     }
-    let status_style = Style::default().fg(theme.foreground).bg(theme.surface);
+    let status_style = Style::default().fg(theme.foreground);
     frame.render_widget(Block::default().style(status_style), area);
 
     let mut right_spans = Vec::new();
@@ -1331,35 +1398,22 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
     );
 }
 
-fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
-    let block = panel(" Preview ", app.focus == Focus::Preview, theme);
-    let inner = block.inner(area);
+fn draw_status_details(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
+    let block = panel(" Status ", app.focus == Focus::Status, theme);
+    let scroll_area = block.inner(area);
+    let inner = status_inner_area(area);
     frame.render_widget(block, area);
 
-    let (header, body) = preview_content(app, theme);
-    let chunks = Layout::vertical([
-        Constraint::Length(header.lines.len() as u16),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .split(inner);
-
-    frame.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), chunks[0]);
-    frame.render_widget(
-        Paragraph::new("─".repeat(chunks[1].width as usize))
-            .style(Style::default().fg(theme.muted)),
-        chunks[1],
-    );
-
-    let viewport_height = chunks[2].height as usize;
-    let content_height = body.lines.len();
+    let content = status_details_content(app, theme);
+    let viewport_height = inner.height as usize;
+    let content_height = wrapped_text_height(&content, inner.width);
     let max_scroll = content_height.saturating_sub(viewport_height);
-    let scroll = max_scroll.saturating_sub(app.preview_scroll as usize);
+    let scroll = (app.status_scroll as usize).min(max_scroll);
     frame.render_widget(
-        Paragraph::new(body)
+        Paragraph::new(content)
             .scroll((scroll as u16, 0))
             .wrap(Wrap { trim: false }),
-        chunks[2],
+        inner,
     );
     if max_scroll > 0 {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -1368,11 +1422,287 @@ fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
             .track_symbol(None)
             .thumb_symbol("│")
             .thumb_style(Style::default().fg(theme.muted));
+        let scrollbar_position = scroll_position_for_scrollbar(scroll, max_scroll, content_height);
         let mut state = ScrollbarState::new(content_height)
-            .position(scroll)
+            .position(scrollbar_position)
             .viewport_content_length(viewport_height);
-        frame.render_stateful_widget(scrollbar, chunks[2], &mut state);
+        frame.render_stateful_widget(scrollbar, scroll_area, &mut state);
     }
+}
+
+fn status_inner_area(area: Rect) -> Rect {
+    area.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    })
+}
+
+fn wrapped_text_height(text: &Text<'_>, width: u16) -> usize {
+    let width = width.max(1) as usize;
+    text.lines
+        .iter()
+        .map(|line| line.width().div_ceil(width).max(1))
+        .sum()
+}
+
+fn status_details_content(app: &App, theme: ResolvedTheme) -> Text<'static> {
+    let rows = app.current_rows();
+    let Some(row) = rows.get(app.row_index) else {
+        return Text::default();
+    };
+    let harness_id = row_harness_id(row);
+    let harness = harness_id.and_then(|id| app.harness(id));
+    let mut text = Text::default();
+
+    push_status_line(
+        &mut text,
+        "Harness",
+        harness_status_spans(harness, theme),
+        theme,
+    );
+
+    match row {
+        Row::Agent(window) => {
+            push_status_line(
+                &mut text,
+                "Project",
+                vec![status_value(format_cwd(&window.cwd), theme.status_project)],
+                theme,
+            );
+            if let Some(title) = &window.chat_title {
+                push_status_line(
+                    &mut text,
+                    "Thread Name",
+                    vec![status_value(title, theme.status_thread_name)],
+                    theme,
+                );
+            }
+            push_status_line(&mut text, "Activity", activity_spans(true, theme), theme);
+            if let Some(thread_id) = &window.thread_id {
+                push_status_line(
+                    &mut text,
+                    "Thread ID",
+                    vec![status_value(thread_id, theme.status_thread_id)],
+                    theme,
+                );
+            }
+        }
+        Row::Thread { thread, live } => {
+            if let Some(path) = thread.storage_paths().next() {
+                push_status_line(
+                    &mut text,
+                    "Sessions",
+                    session_path_spans(path, theme),
+                    theme,
+                );
+            }
+            push_status_line(
+                &mut text,
+                "Project",
+                vec![status_value(format_cwd(&thread.cwd), theme.status_project)],
+                theme,
+            );
+            text.push_line("");
+            push_status_line(
+                &mut text,
+                "Thread Name",
+                vec![status_value(thread.title(), theme.status_thread_name)],
+                theme,
+            );
+            push_status_line(
+                &mut text,
+                "Activity",
+                activity_spans(live.is_some(), theme),
+                theme,
+            );
+            push_status_line(
+                &mut text,
+                "Thread ID",
+                vec![status_value(&thread.id, theme.status_thread_id)],
+                theme,
+            );
+            let (archive_label, archive_color) = if thread.archived {
+                ("yes", theme.status_archived)
+            } else {
+                ("no", theme.status_context)
+            };
+            push_status_line(
+                &mut text,
+                "Archived",
+                vec![status_value(archive_label, archive_color)],
+                theme,
+            );
+            push_status_line(
+                &mut text,
+                "Created",
+                vec![status_value(
+                    format_timestamp(thread.created_at),
+                    theme.status_timestamp,
+                )],
+                theme,
+            );
+            push_status_line(
+                &mut text,
+                "Updated",
+                vec![status_value(
+                    format_timestamp(thread.updated_at),
+                    theme.status_updated,
+                )],
+                theme,
+            );
+            if thread.context_remaining.is_some() {
+                text.push_line("");
+            }
+            if let Some(context) = &thread.context_remaining {
+                push_status_line(
+                    &mut text,
+                    "Context Remaining",
+                    vec![status_value(
+                        format_context_remaining(context),
+                        theme.status_context,
+                    )],
+                    theme,
+                );
+            }
+        }
+    }
+    text
+}
+
+fn push_status_line(
+    text: &mut Text<'static>,
+    key: &str,
+    value: Vec<Span<'static>>,
+    theme: ResolvedTheme,
+) {
+    let mut spans = vec![Span::styled(
+        format!("{key}: "),
+        Style::default()
+            .fg(theme.status_key)
+            .add_modifier(Modifier::BOLD),
+    )];
+    spans.extend(value);
+    text.push_line(Line::from(spans));
+}
+
+fn status_value(value: impl AsRef<str>, color: Color) -> Span<'static> {
+    Span::styled(value.as_ref().to_string(), Style::default().fg(color))
+}
+
+fn harness_status_spans(harness: Option<&Harness>, theme: ResolvedTheme) -> Vec<Span<'static>> {
+    let Some(harness) = harness else {
+        return vec![status_value("Unknown", theme.foreground)];
+    };
+    let color = new_chat_harness_color(&harness.id, theme);
+    vec![status_value(&harness.marker, color)]
+}
+
+fn session_path_spans(path: &str, theme: ResolvedTheme) -> Vec<Span<'static>> {
+    let Some(session_root) = session_root_path(path) else {
+        return vec![status_value("unknown", theme.muted)];
+    };
+    vec![status_value(
+        display_dir_path(session_root.to_string_lossy().as_ref()),
+        theme.status_sessions,
+    )]
+}
+
+fn session_root_path(path: &str) -> Option<&Path> {
+    let path = Path::new(path);
+    path.ancestors()
+        .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("sessions"))
+        .or_else(|| path.parent())
+}
+
+fn activity_spans(is_live: bool, theme: ResolvedTheme) -> Vec<Span<'static>> {
+    let (label, color) = if is_live {
+        ("● live", theme.live)
+    } else {
+        ("○ inactive", theme.inactive)
+    };
+    vec![status_value(label, color)]
+}
+
+fn format_context_remaining(context: &crate::agent::ContextRemaining) -> String {
+    format!(
+        "{}% left ({} used / {})",
+        context.percent_left(),
+        format_token_count(context.used_tokens),
+        format_token_count(context.max_tokens)
+    )
+}
+
+fn format_token_count(tokens: u64) -> String {
+    if tokens >= 1_000 {
+        format!("{}K", (tokens as f64 / 1_000.0).round() as u64)
+    } else {
+        tokens.to_string()
+    }
+}
+
+fn draw_preview(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
+    let block = panel(" Preview ", app.focus == Focus::Preview, theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let (header, body) = preview_content(app, theme);
+    let header_height = header.lines.len() as u16;
+    let divider_height = u16::from(header_height > 0);
+    let chunks = Layout::vertical([
+        Constraint::Length(header_height),
+        Constraint::Length(divider_height),
+        Constraint::Min(0),
+    ])
+    .split(inner);
+
+    if header_height > 0 {
+        frame.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), chunks[0]);
+        frame.render_widget(
+            Paragraph::new("─".repeat(chunks[1].width as usize))
+                .style(Style::default().fg(theme.muted)),
+            chunks[1],
+        );
+    }
+
+    let body_area = chunks[2];
+    let viewport_height = body_area.height as usize;
+    let content_height = wrapped_text_height(&body, body_area.width);
+    let max_scroll = content_height.saturating_sub(viewport_height);
+    let scroll = max_scroll.saturating_sub((app.preview_scroll as usize).min(max_scroll));
+    frame.render_widget(
+        Paragraph::new(body)
+            .scroll((scroll as u16, 0))
+            .wrap(Wrap { trim: false }),
+        body_area,
+    );
+    if max_scroll > 0 {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(None)
+            .thumb_symbol("│")
+            .thumb_style(Style::default().fg(theme.muted));
+        let scrollbar_position = scroll_position_for_scrollbar(scroll, max_scroll, content_height);
+        let mut state = ScrollbarState::new(content_height)
+            .position(scrollbar_position)
+            .viewport_content_length(viewport_height);
+        frame.render_stateful_widget(scrollbar, body_area, &mut state);
+    }
+}
+
+fn preview_body_area(area: Rect, header: &Text<'_>) -> Rect {
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    let header_height = header.lines.len() as u16;
+    let divider_height = u16::from(header_height > 0);
+    Layout::vertical([
+        Constraint::Length(header_height),
+        Constraint::Length(divider_height),
+        Constraint::Min(0),
+    ])
+    .split(inner)[2]
 }
 
 fn preview_content(app: &App, theme: ResolvedTheme) -> (Text<'static>, Text<'static>) {
@@ -1394,43 +1724,8 @@ fn preview_content(app: &App, theme: ResolvedTheme) -> (Text<'static>, Text<'sta
                 ));
                 body.push_line("CIA will switch to this window without guessing which saved thread it contains.");
             }
-            Row::Thread { thread, live } => {
+            Row::Thread { thread, live: _ } => {
                 let harness = app.harness(&thread.harness_id);
-                header.push_line(metadata_line(
-                    "Thread",
-                    thread.title(),
-                    theme.preview_metadata_thread,
-                    theme,
-                ));
-                header.push_line(status_metadata_line("Status", live.is_some(), theme));
-                header.push_line(harness_metadata_line(
-                    "Harness",
-                    harness
-                        .map(|harness| harness.marker.as_str())
-                        .unwrap_or("?"),
-                    new_chat_harness_color(&thread.harness_id, theme),
-                    theme,
-                ));
-                if let Some(context) = &thread.context_remaining {
-                    header.push_line(metadata_line(
-                        "Context Remaining",
-                        format_context_remaining(context),
-                        theme.preview_metadata_context,
-                        theme,
-                    ));
-                }
-                header.push_line(metadata_line(
-                    "Created",
-                    format_timestamp(thread.created_at),
-                    theme.preview_metadata_date,
-                    theme,
-                ));
-                header.push_line(metadata_line(
-                    "CWD",
-                    format_cwd(&thread.cwd),
-                    theme.preview_metadata_path,
-                    theme,
-                ));
                 if app.preview.is_empty() {
                     let preview = if thread.preview.is_empty() {
                         "No transcript preview available.".to_string()
@@ -1472,51 +1767,6 @@ fn preview_content(app: &App, theme: ResolvedTheme) -> (Text<'static>, Text<'sta
         }
     }
     (header, body)
-}
-
-fn metadata_line(
-    key: &str,
-    value: impl AsRef<str>,
-    value_color: Color,
-    theme: ResolvedTheme,
-) -> Line<'static> {
-    Line::from(vec![
-        metadata_key_span(key, theme),
-        Span::styled(value.as_ref().to_string(), Style::default().fg(value_color)),
-    ])
-}
-
-fn harness_metadata_line(
-    key: &str,
-    marker: &str,
-    harness_color: Color,
-    theme: ResolvedTheme,
-) -> Line<'static> {
-    Line::from(vec![
-        metadata_key_span(key, theme),
-        Span::styled(marker.to_string(), Style::default().fg(harness_color)),
-    ])
-}
-
-fn status_metadata_line(key: &str, is_live: bool, theme: ResolvedTheme) -> Line<'static> {
-    let (label, color) = if is_live {
-        ("● active", theme.live)
-    } else {
-        ("○ inactive", theme.inactive)
-    };
-    Line::from(vec![
-        metadata_key_span(key, theme),
-        Span::styled(label, Style::default().fg(color)),
-    ])
-}
-
-fn metadata_key_span(key: &str, theme: ResolvedTheme) -> Span<'static> {
-    Span::styled(
-        format!("{key}: "),
-        Style::default()
-            .fg(theme.preview_metadata_key)
-            .add_modifier(Modifier::BOLD),
-    )
 }
 
 fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
@@ -1811,8 +2061,6 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
 
 #[derive(Clone, Copy)]
 struct ResolvedTheme {
-    background: Color,
-    surface: Color,
     foreground: Color,
     muted: Color,
     accent: Color,
@@ -1832,14 +2080,18 @@ struct ResolvedTheme {
     status_unarchive: Color,
     status_delete: Color,
     status_help: Color,
+    status_key: Color,
+    status_sessions: Color,
+    status_project: Color,
+    status_thread_name: Color,
+    status_thread_id: Color,
+    status_context: Color,
+    status_archived: Color,
+    status_timestamp: Color,
+    status_updated: Color,
     archive_icon: Color,
     preview_user: Color,
     preview_text: Color,
-    preview_metadata_key: Color,
-    preview_metadata_thread: Color,
-    preview_metadata_context: Color,
-    preview_metadata_date: Color,
-    preview_metadata_path: Color,
     new_chat_unfocused: Color,
     new_chat_pi: Color,
     new_chat_claude: Color,
@@ -1857,8 +2109,6 @@ struct ResolvedTheme {
 impl From<&ThemeConfig> for ResolvedTheme {
     fn from(value: &ThemeConfig) -> Self {
         Self {
-            background: color(&value.background),
-            surface: color(&value.surface),
             foreground: color(&value.foreground),
             muted: color(&value.muted),
             accent: color(&value.accent),
@@ -1878,14 +2128,18 @@ impl From<&ThemeConfig> for ResolvedTheme {
             status_unarchive: color(&value.status_unarchive),
             status_delete: color(&value.status_delete),
             status_help: color(&value.status_help),
+            status_key: color(&value.status_key),
+            status_sessions: color(&value.status_sessions),
+            status_project: color(&value.status_project),
+            status_thread_name: color(&value.status_thread_name),
+            status_thread_id: color(&value.status_thread_id),
+            status_context: color(&value.status_context),
+            status_archived: color(&value.status_archived),
+            status_timestamp: color(&value.status_timestamp),
+            status_updated: color(&value.status_updated),
             archive_icon: color(&value.archive_icon),
             preview_user: color(&value.preview_user),
             preview_text: color(&value.preview_text),
-            preview_metadata_key: color(&value.preview_metadata_key),
-            preview_metadata_thread: color(&value.preview_metadata_thread),
-            preview_metadata_context: color(&value.preview_metadata_context),
-            preview_metadata_date: color(&value.preview_metadata_date),
-            preview_metadata_path: color(&value.preview_metadata_path),
             new_chat_unfocused: color(&value.new_chat_unfocused),
             new_chat_pi: color(&value.new_chat_pi),
             new_chat_claude: color(&value.new_chat_claude),
@@ -1926,7 +2180,7 @@ fn panel<'a>(title: &'a str, focused: bool, theme: ResolvedTheme) -> Block<'a> {
         } else {
             theme.border_unfocused
         }))
-        .style(Style::default().fg(theme.foreground).bg(theme.surface))
+        .style(Style::default().fg(theme.foreground))
 }
 
 fn selected(theme: ResolvedTheme) -> Style {
@@ -2056,7 +2310,8 @@ fn row_harness_id(row: &Row) -> Option<&str> {
 fn next_focus(focus: Focus) -> Focus {
     match focus {
         Focus::Projects => Focus::Threads,
-        Focus::Threads => Focus::Preview,
+        Focus::Threads => Focus::Status,
+        Focus::Status => Focus::Preview,
         Focus::Preview => Focus::Projects,
     }
 }
@@ -2064,7 +2319,8 @@ fn previous_focus(focus: Focus) -> Focus {
     match focus {
         Focus::Projects => Focus::Preview,
         Focus::Threads => Focus::Projects,
-        Focus::Preview => Focus::Threads,
+        Focus::Status => Focus::Threads,
+        Focus::Preview => Focus::Status,
     }
 }
 fn move_index(current: usize, len: usize, delta: isize) -> usize {
@@ -2072,6 +2328,29 @@ fn move_index(current: usize, len: usize, delta: isize) -> usize {
         0
     } else {
         (current as isize + delta).rem_euclid(len as isize) as usize
+    }
+}
+
+fn scroll_position_for_scrollbar(scroll: usize, max_scroll: usize, content_height: usize) -> usize {
+    scroll
+        .saturating_mul(content_height.saturating_sub(1))
+        .checked_div(max_scroll)
+        .unwrap_or(0)
+}
+
+fn scrolled(current: u16, delta: isize) -> u16 {
+    if delta.is_negative() {
+        current.saturating_sub(delta.unsigned_abs() as u16)
+    } else {
+        current.saturating_add(delta as u16)
+    }
+}
+
+fn scrolled_from_bottom(current: u16, delta: isize) -> u16 {
+    if delta.is_negative() {
+        current.saturating_add(delta.unsigned_abs() as u16)
+    } else {
+        current.saturating_sub(delta as u16)
     }
 }
 
@@ -2315,23 +2594,6 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-fn format_context_remaining(context: &crate::agent::ContextRemaining) -> String {
-    format!(
-        "{}% left ({} used / {})",
-        context.percent_left(),
-        format_token_count(context.used_tokens),
-        format_token_count(context.max_tokens)
-    )
-}
-
-fn format_token_count(tokens: u64) -> String {
-    if tokens >= 1_000 {
-        format!("{}K", (tokens as f64 / 1_000.0).round() as u64)
-    } else {
-        tokens.to_string()
-    }
-}
-
 fn format_timestamp(timestamp: i64) -> String {
     time::OffsetDateTime::from_unix_timestamp(timestamp)
         .map(|date| format!("{} {:02}, {}", date.month(), date.day(), date.year()))
@@ -2382,7 +2644,7 @@ mod tests {
             cwd: "/tmp/repo".into(),
         };
         let chat = DeleteTarget::Chat {
-            thread: Thread {
+            thread: Box::new(Thread {
                 harness_id: "codex".into(),
                 id: "thread".into(),
                 name: Some("chat".into()),
@@ -2394,7 +2656,7 @@ mod tests {
                 context_remaining: None,
                 archived: false,
                 path: None,
-            },
+            }),
         };
         assert_eq!(
             delete_choice_at(13, 9, popup, &project),

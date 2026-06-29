@@ -114,6 +114,15 @@ pub struct ThemeConfig {
     pub status_delete: String,
     pub archive_icon: String,
     pub status_help: String,
+    pub status_key: String,
+    pub status_sessions: String,
+    pub status_project: String,
+    pub status_thread_name: String,
+    pub status_thread_id: String,
+    pub status_context: String,
+    pub status_archived: String,
+    pub status_timestamp: String,
+    pub status_updated: String,
     pub preview_user: String,
     pub preview_codex: String,
     pub preview_pi: String,
@@ -220,14 +229,14 @@ impl Default for UiConfig {
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
-            background: "#101218".into(),
-            surface: "#1b1e28".into(),
+            background: "".into(),
+            surface: "".into(),
             foreground: "#e6e6e6".into(),
             muted: "#747b8c".into(),
             accent: "#a8c7fa".into(),
             selected: "#30364a".into(),
             success: "#9bd5a5".into(),
-            live: "$GREEN_HEX".into(),
+            live: "$BRIGHTGREEN_HEX".into(),
             inactive: "$BRIGHTBLACK_HEX".into(),
             warning: "#e5c07b".into(),
             error: "$BRIGHTRED_HEX".into(),
@@ -247,12 +256,21 @@ impl Default for ThemeConfig {
             status_delete: "#e06c75".into(),
             archive_icon: "#ff0000".into(),
             status_help: "#e5c07b".into(),
+            status_key: "$WHITE_HEX".into(),
+            status_sessions: "$BLUE_HEX".into(),
+            status_project: "$BLUE_HEX".into(),
+            status_thread_name: "$YELLOW_HEX".into(),
+            status_thread_id: "$BRIGHTYELLOW_HEX".into(),
+            status_context: "$CYAN_HEX".into(),
+            status_archived: "$RED_HEX".into(),
+            status_timestamp: "$BLACK_HEX".into(),
+            status_updated: "$BRIGHTMAGENTA_HEX".into(),
             preview_user: "#0000ff".into(),
             preview_codex: "#00ffff".into(),
             preview_pi: "$MAGENTA_HEX".into(),
             preview_text: "#e6e6e6".into(),
             preview_title: "$CYAN_HEX".into(),
-            preview_metadata_key: "$BLACK_HEX".into(),
+            preview_metadata_key: "$WHITE_HEX".into(),
             preview_metadata_thread: "$YELLOW_HEX".into(),
             preview_metadata_context: "$GREEN_HEX".into(),
             preview_metadata_date: "$BRIGHTMAGENTA_HEX".into(),
@@ -260,7 +278,7 @@ impl Default for ThemeConfig {
             new_chat_unfocused: "$BRIGHTBLACK_HEX".into(),
             new_chat_pi: "$MAGENTA_HEX".into(),
             new_chat_claude: "$BRIGHTYELLOW_HEX".into(),
-            new_chat_codex: "$BRIGHTMAGENTA_HEX".into(),
+            new_chat_codex: "$BRIGHTBLUE_HEX".into(),
             new_chat_cursor: DEFAULT_NEW_CHAT_CURSOR_COLOR.into(),
             new_chat_opencode: DEFAULT_NEW_CHAT_OPENCODE_COLOR.into(),
             new_chat_path: "$BLUE_HEX".into(),
@@ -379,6 +397,15 @@ impl ThemeConfig {
         self.status_delete = expand_env_vars(&self.status_delete);
         self.archive_icon = expand_env_vars(&self.archive_icon);
         self.status_help = expand_env_vars(&self.status_help);
+        self.status_key = expand_env_vars(&self.status_key);
+        self.status_sessions = expand_env_vars(&self.status_sessions);
+        self.status_project = expand_env_vars(&self.status_project);
+        self.status_thread_name = expand_env_vars(&self.status_thread_name);
+        self.status_thread_id = expand_env_vars(&self.status_thread_id);
+        self.status_context = expand_env_vars(&self.status_context);
+        self.status_archived = expand_env_vars(&self.status_archived);
+        self.status_timestamp = expand_env_vars(&self.status_timestamp);
+        self.status_updated = expand_env_vars(&self.status_updated);
         self.preview_user = expand_env_vars(&self.preview_user);
         self.preview_codex = expand_env_vars(&self.preview_codex);
         self.preview_pi = expand_env_vars(&self.preview_pi);
@@ -472,18 +499,29 @@ mod tests {
         let cfg: Config = toml::from_str("[theme]\nstatus_open = \"#112233\"\n").unwrap();
         assert_eq!(cfg.theme.status_open, "#112233");
         assert_eq!(cfg.theme.status_projects, "#e6e6e6");
+        assert_eq!(cfg.theme.background, "");
+        assert_eq!(cfg.theme.surface, "");
         assert_eq!(cfg.theme.title_focused, "#d2fd9d");
         assert_eq!(cfg.theme.title_unfocused, "#5c617d");
         assert_eq!(cfg.theme.border_focused, "#000000");
         assert_eq!(cfg.theme.border_unfocused, "#5c617d");
         assert_eq!(cfg.theme.status_new, "#80d7fe");
         assert_eq!(cfg.theme.status_new_chat, "#9bd5a5");
-        assert_eq!(cfg.theme.live, "$GREEN_HEX");
+        assert_eq!(cfg.theme.live, "$BRIGHTGREEN_HEX");
         assert_eq!(cfg.theme.inactive, "$BRIGHTBLACK_HEX");
+        assert_eq!(cfg.theme.status_key, "$WHITE_HEX");
+        assert_eq!(cfg.theme.status_sessions, "$BLUE_HEX");
+        assert_eq!(cfg.theme.status_project, "$BLUE_HEX");
+        assert_eq!(cfg.theme.status_thread_name, "$YELLOW_HEX");
+        assert_eq!(cfg.theme.status_thread_id, "$BRIGHTYELLOW_HEX");
+        assert_eq!(cfg.theme.status_context, "$CYAN_HEX");
+        assert_eq!(cfg.theme.status_archived, "$RED_HEX");
+        assert_eq!(cfg.theme.status_timestamp, "$BLACK_HEX");
+        assert_eq!(cfg.theme.status_updated, "$BRIGHTMAGENTA_HEX");
         assert_eq!(cfg.theme.preview_codex, "#00ffff");
         assert_eq!(cfg.theme.preview_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.preview_title, "$CYAN_HEX");
-        assert_eq!(cfg.theme.preview_metadata_key, "$BLACK_HEX");
+        assert_eq!(cfg.theme.preview_metadata_key, "$WHITE_HEX");
         assert_eq!(cfg.theme.preview_metadata_thread, "$YELLOW_HEX");
         assert_eq!(cfg.theme.preview_metadata_context, "$GREEN_HEX");
         assert_eq!(cfg.theme.preview_metadata_date, "$BRIGHTMAGENTA_HEX");
@@ -491,7 +529,7 @@ mod tests {
         assert_eq!(cfg.theme.new_chat_unfocused, "$BRIGHTBLACK_HEX");
         assert_eq!(cfg.theme.new_chat_pi, "$MAGENTA_HEX");
         assert_eq!(cfg.theme.new_chat_claude, "$BRIGHTYELLOW_HEX");
-        assert_eq!(cfg.theme.new_chat_codex, "$BRIGHTMAGENTA_HEX");
+        assert_eq!(cfg.theme.new_chat_codex, "$BRIGHTBLUE_HEX");
         assert_eq!(cfg.theme.new_chat_cursor, DEFAULT_NEW_CHAT_CURSOR_COLOR);
         assert_eq!(cfg.theme.new_chat_opencode, DEFAULT_NEW_CHAT_OPENCODE_COLOR);
         assert_eq!(cfg.theme.new_chat_path, "$BLUE_HEX");
