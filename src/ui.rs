@@ -884,8 +884,12 @@ impl App {
             KeyCode::Enter => self.activate(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(1),
             KeyCode::Up | KeyCode::Char('k') => self.select_next(-1),
-            KeyCode::Tab | KeyCode::Char('l') => self.focus = next_focus(self.focus),
-            KeyCode::BackTab | KeyCode::Char('h') => self.focus = previous_focus(self.focus),
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                self.focus = next_focus(self.focus)
+            }
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                self.focus = previous_focus(self.focus)
+            }
             _ => {}
         }
     }
@@ -1187,22 +1191,20 @@ fn draw_threads(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Resolv
     let items: Vec<ListItem> = app
         .current_rows()
         .iter()
-        .enumerate()
-        .map(|(index, row)| {
+        .map(|row| {
             let marker = if row.is_live() {
                 Span::styled("● ", Style::default().fg(theme.success))
             } else {
                 Span::styled("  ", Style::default().fg(theme.muted))
             };
-            let harness = row_harness_id(row)
+            let harness_id = row_harness_id(row);
+            let harness = harness_id
                 .and_then(|harness_id| app.harness(harness_id))
-                .map(|harness| harness.label.as_str())
+                .map(|harness| harness.marker.as_str())
                 .unwrap_or("?");
-            let harness_color = if index == app.row_index {
-                Color::Cyan
-            } else {
-                theme.muted
-            };
+            let harness_color = harness_id
+                .and_then(harness_brand_color)
+                .unwrap_or(theme.muted);
             let archive_marker = match row {
                 Row::Thread { thread, .. } if app.show_archived && thread.archived => Span::styled(
                     format!(" {}", app.config.ui.archive_icon),
@@ -1301,7 +1303,7 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                 text.push_line(Line::styled(
                     thread.title().to_string(),
                     Style::default()
-                        .fg(theme.accent)
+                        .fg(theme.preview_title)
                         .add_modifier(Modifier::BOLD),
                 ));
                 let branch = thread
@@ -1339,22 +1341,19 @@ fn preview_text(app: &App, theme: ResolvedTheme) -> Text<'static> {
                         let is_user = message.role == "You";
                         let role = if is_user {
                             app.username.as_str()
-                        } else if thread.harness_id == PI_HARNESS_ID {
+                        } else {
                             harness
                                 .map(|harness| harness.marker.as_str())
-                                .unwrap_or("π")
-                        } else {
-                            &message.role
+                                .unwrap_or(message.role.as_str())
                         };
                         text.push_line(Line::styled(
                             role.to_string(),
                             Style::default()
                                 .fg(if is_user {
                                     theme.preview_user
-                                } else if thread.harness_id == PI_HARNESS_ID {
-                                    theme.preview_pi
                                 } else {
-                                    theme.preview_codex
+                                    harness_brand_color(&thread.harness_id)
+                                        .unwrap_or(theme.preview_codex)
                                 })
                                 .add_modifier(Modifier::BOLD),
                         ));
@@ -1576,14 +1575,18 @@ fn draw_new_project_prompt(
 }
 
 fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
-    let popup = centered(area, 84, 5);
+    let popup = if app.new_chat_picking_harness {
+        centered(area, 96, app.harnesses.len() as u16 + 4)
+    } else {
+        centered(area, 84, 5)
+    };
     frame.render_widget(Clear, popup);
     if app.new_chat_picking_harness {
-        let spans = app
+        let lines = app
             .harnesses
             .iter()
             .enumerate()
-            .flat_map(|(index, harness)| {
+            .map(|(index, harness)| {
                 let harness_color = new_chat_harness_color(&harness.id, theme);
                 let style = if index == app.new_chat_harness_index {
                     Style::default()
@@ -1593,14 +1596,36 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                 } else {
                     Style::default().fg(theme.new_chat_unfocused)
                 };
-                [
-                    Span::raw(" "),
-                    Span::styled(format!(" {}  {} ", harness.marker, harness.label), style),
-                ]
+                let command_path = harness
+                    .command_path
+                    .as_deref()
+                    .map(display_path)
+                    .unwrap_or_else(|| harness.command.clone());
+                let (path_prefix, executable) = split_executable_path(&command_path);
+                let path_style = if index == app.new_chat_harness_index {
+                    Style::default().fg(theme.new_chat_path).bg(theme.selected)
+                } else {
+                    style
+                };
+                let executable_style = if index == app.new_chat_harness_index {
+                    Style::default()
+                        .fg(theme.new_chat_executable)
+                        .bg(theme.selected)
+                } else {
+                    style
+                };
+                Line::from(vec![
+                    Span::styled(
+                        format!(" {:<2} {:<14}", harness.marker, harness.label),
+                        style,
+                    ),
+                    Span::styled(format!(" {path_prefix}"), path_style),
+                    Span::styled(format!("{executable} "), executable_style),
+                ])
             })
             .collect::<Vec<_>>();
         frame.render_widget(
-            Paragraph::new(Line::from(spans))
+            Paragraph::new(Text::from(lines))
                 .block(panel(" Select Harness ", true, theme))
                 .style(Style::default().fg(theme.foreground)),
             popup,
@@ -1639,14 +1664,16 @@ struct ResolvedTheme {
     archive_icon: Color,
     preview_user: Color,
     preview_codex: Color,
-    preview_pi: Color,
     preview_text: Color,
+    preview_title: Color,
     new_chat_unfocused: Color,
     new_chat_pi: Color,
     new_chat_claude: Color,
     new_chat_codex: Color,
     new_chat_cursor: Color,
     new_chat_opencode: Color,
+    new_chat_path: Color,
+    new_chat_executable: Color,
     selected: Color,
     success: Color,
     warning: Color,
@@ -1677,14 +1704,16 @@ impl From<&ThemeConfig> for ResolvedTheme {
             archive_icon: color(&value.archive_icon),
             preview_user: color(&value.preview_user),
             preview_codex: color(&value.preview_codex),
-            preview_pi: color(&value.preview_pi),
             preview_text: color(&value.preview_text),
+            preview_title: color(&value.preview_title),
             new_chat_unfocused: color(&value.new_chat_unfocused),
             new_chat_pi: color(&value.new_chat_pi),
             new_chat_claude: color(&value.new_chat_claude),
             new_chat_codex: color(&value.new_chat_codex),
             new_chat_cursor: color(&value.new_chat_cursor),
             new_chat_opencode: color(&value.new_chat_opencode),
+            new_chat_path: color(&value.new_chat_path),
+            new_chat_executable: color(&value.new_chat_executable),
             selected: color(&value.selected),
             success: color(&value.success),
             warning: color(&value.warning),
@@ -1980,6 +2009,21 @@ fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
     }
 }
 
+fn split_executable_path(path: &str) -> (&str, &str) {
+    path.rsplit_once('/')
+        .map(|(prefix, executable)| (&path[..prefix.len() + 1], executable))
+        .unwrap_or(("", path))
+}
+
+fn harness_brand_color(harness_id: &str) -> Option<Color> {
+    match harness_id {
+        PI_HARNESS_ID => Some(Color::Rgb(0xec, 0xce, 0xf0)),
+        CLAUDE_HARNESS_ID => Some(Color::Rgb(0xf3, 0xb1, 0x75)),
+        CODEX_HARNESS_ID => Some(Color::Rgb(0x80, 0xd7, 0xfe)),
+        _ => None,
+    }
+}
+
 fn new_chat_harness_color(harness_id: &str, theme: ResolvedTheme) -> Color {
     match harness_id {
         PI_HARNESS_ID => theme.new_chat_pi,
@@ -1992,20 +2036,12 @@ fn new_chat_harness_color(harness_id: &str, theme: ResolvedTheme) -> Color {
 }
 
 fn harness_index_at(x: u16, y: u16, popup: Rect, harnesses: &[Harness]) -> Option<usize> {
-    if y != popup.y.saturating_add(1) {
+    if x <= popup.x || x >= popup.x.saturating_add(popup.width).saturating_sub(1) {
         return None;
     }
-    let mut cursor = popup.x.saturating_add(1);
-    for (index, harness) in harnesses.iter().enumerate() {
-        cursor = cursor.saturating_add(1);
-        let width = (harness.marker.chars().count() + harness.label.chars().count() + 4) as u16;
-        let end = cursor.saturating_add(width);
-        if x >= cursor && x < end {
-            return Some(index);
-        }
-        cursor = end;
-    }
-    None
+    let first_row = popup.y.saturating_add(1);
+    let index = y.checked_sub(first_row)? as usize;
+    (index < harnesses.len()).then_some(index)
 }
 
 fn delete_choices(target: &DeleteTarget) -> &'static [DeleteChoice] {

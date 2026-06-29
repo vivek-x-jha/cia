@@ -93,6 +93,7 @@ pub struct Harness {
     pub label: String,
     pub marker: String,
     pub command: String,
+    pub command_path: Option<String>,
     client: Box<dyn Client>,
 }
 
@@ -159,6 +160,7 @@ impl Harness {
             label: config.codex.label.clone(),
             marker: config.codex.icon.clone(),
             command: config.codex.command.clone(),
+            command_path: command_path(&config.codex.command),
             client: Box::new(codex::Client::start(&config.codex.command)?),
         })
     }
@@ -169,6 +171,7 @@ impl Harness {
             label: config.pi.label.clone(),
             marker: config.pi.icon.clone(),
             command: config.pi.command.clone(),
+            command_path: command_path(&config.pi.command),
             client: Box::new(pi::Client::new(config.pi.session_dir.clone())),
         })
     }
@@ -179,6 +182,7 @@ impl Harness {
             label: label.into(),
             marker: marker.into(),
             command: command.into(),
+            command_path: command_path(command),
             client: Box::new(BasicClient),
         }
     }
@@ -209,7 +213,11 @@ impl Client for BasicClient {
 }
 
 fn command_exists(command: &str) -> bool {
-    std::process::Command::new("zsh")
+    command_path(command).is_some()
+}
+
+fn command_path(command: &str) -> Option<String> {
+    let output = std::process::Command::new("zsh")
         .args([
             "-lc",
             &format!(
@@ -218,6 +226,12 @@ fn command_exists(command: &str) -> bool {
             ),
         ])
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .and_then(|stdout| stdout.lines().next().map(str::trim).map(str::to_owned))
+        .filter(|path| !path.is_empty())
 }
