@@ -1636,15 +1636,21 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
             .map(|(index, harness)| {
                 let harness_color = new_chat_harness_color(&harness.id, theme);
                 let selected = index == app.new_chat_harness_index;
-                let harness_style = if selected {
-                    Style::default()
-                        .fg(harness_color)
-                        .bg(theme.selected)
-                        .add_modifier(Modifier::BOLD)
+                let unfocused_style = Style::default().fg(theme.new_chat_unfocused);
+                let selected_harness_style = Style::default()
+                    .fg(harness_color)
+                    .bg(theme.selected)
+                    .add_modifier(Modifier::BOLD);
+                let icon_style = if selected {
+                    selected_harness_style
                 } else {
                     Style::default().fg(harness_color)
                 };
-                let unfocused_style = Style::default().fg(theme.new_chat_unfocused);
+                let label_style = if selected {
+                    selected_harness_style
+                } else {
+                    unfocused_style
+                };
                 let command_path = harness
                     .command_path
                     .as_deref()
@@ -1664,10 +1670,8 @@ fn draw_new_chat_prompt(frame: &mut ratatui::Frame, area: Rect, app: &App, theme
                     unfocused_style
                 };
                 Line::from(vec![
-                    Span::styled(
-                        format!(" {:<2} {:<14}", harness.marker, harness.label),
-                        harness_style,
-                    ),
+                    Span::styled(format!(" {:<2} ", harness.marker), icon_style),
+                    Span::styled(format!("{:<14}", harness.label), label_style),
                     Span::styled(format!(" {path_prefix}"), path_style),
                     Span::styled(format!("{executable} "), executable_style),
                 ])

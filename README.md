@@ -317,7 +317,7 @@ icon values are plain strings, so you can replace them with ASCII if your
 terminal font lacks a glyph. Harness labels are plain strings too, so the
 new-chat text segments are customizable from config. The new-chat harness picker
 is vertical and includes a CLI path column resolved with `command -v` for each
-harness; missing CLI tools display `-` and selecting them shows a not-found error. Harness icon/label colors come from `theme.new_chat_*`, including unfocused rows; the CLI path column uses the unfocused/path/executable colors. Existing config values override these defaults, so set `theme.new_chat_cursor = "$BLACK_HEX"` and `theme.new_chat_opencode = "$WHITE_HEX"` in your config if you previously copied older defaults. This includes `ui.archive_icon`, the glyph shown beside archived chats. You can override only
+harness; missing CLI tools display `-` and selecting them shows a not-found error. Harness icons always use their `theme.new_chat_*` color. The selected harness label also uses that color; unfocused harness labels and CLI path text use `theme.new_chat_unfocused`. Existing config values override these defaults, so set `theme.new_chat_cursor = "$BLACK_HEX"` and `theme.new_chat_opencode = "$WHITE_HEX"` in your config if you previously copied older defaults. This includes `ui.archive_icon`, the glyph shown beside archived chats. You can override only
 the colors, icons, labels, and commands you care about; unset keys continue
 using the defaults above.
 
