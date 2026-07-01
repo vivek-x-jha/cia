@@ -8,10 +8,11 @@ mod state;
 mod tmux;
 mod ui;
 
-use std::{borrow::Cow, path::PathBuf, process::Command};
+use std::{borrow::Cow, io, path::PathBuf, process::Command};
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -36,6 +37,12 @@ enum Commands {
         /// Harness to search: pi, claude, codex, cursor, opencode, or all
         #[arg(long, default_value = "all")]
         harness: String,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
     },
 
     /// Resume an agent thread while preserving tmux metadata
@@ -68,6 +75,10 @@ fn main() -> Result<()> {
             harness,
         }) => {
             return open_thread_by_query(&config, args.project, &query, archived, &harness);
+        }
+        Some(Commands::Completions { shell }) => {
+            generate(shell, &mut Args::command(), "cia", &mut io::stdout());
+            return Ok(());
         }
         Some(Commands::RunThread {
             thread_id,

@@ -5,7 +5,7 @@
 **A tmux-native dashboard for Codex, Pi, and other coding-agent chats.**
 
 <p>
-  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.4.0-eccef0?style=flat-square"></a>
+  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.5.0-eccef0?style=flat-square"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/built_with-Rust-ea6962?style=flat-square&logo=rust"></a>
   <a href="https://ratatui.rs/"><img alt="UI" src="https://img.shields.io/badge/UI-Ratatui-a9b665?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-7daea3?style=flat-square"></a>
@@ -90,6 +90,15 @@ cia open "thread name"
 cia --project /path/to/project open "partial title"
 cia open --archived "old thread"
 cia open --harness pi "daily driver task"
+```
+
+Generate shell completions and write them to a directory loaded by your shell:
+
+```sh
+# Paths are examples; write to a directory loaded by your shell.
+cia completions bash > ~/.dotfiles/shells/bash/cmps/cia.bash
+cia completions zsh > "$ZDOTDIR/comps/_cia"
+cia completions fish > "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/cia.fish"
 ```
 
 ### tmux popup
