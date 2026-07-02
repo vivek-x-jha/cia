@@ -30,6 +30,8 @@ pub struct State {
     #[serde(default)]
     pub archived_threads: Vec<ArchivedThread>,
     #[serde(default)]
+    pub hidden_threads: Vec<ArchivedThread>,
+    #[serde(default)]
     pub project_paths: Vec<String>,
     #[serde(default)]
     pub hidden_project_paths: Vec<String>,
@@ -51,6 +53,7 @@ impl Default for State {
             last_project: None,
             mappings: Vec::new(),
             archived_threads: Vec::new(),
+            hidden_threads: Vec::new(),
             project_paths: Vec::new(),
             hidden_project_paths: Vec::new(),
             deleted_project_paths: Vec::new(),
@@ -120,6 +123,23 @@ impl State {
         }
     }
 
+    pub fn is_hidden(&self, harness_id: &str, thread_id: &str) -> bool {
+        self.hidden_threads
+            .iter()
+            .any(|thread| thread.harness_id == harness_id && thread.thread_id == thread_id)
+    }
+
+    pub fn set_hidden(&mut self, harness_id: &str, thread_id: &str, hidden: bool) {
+        self.hidden_threads
+            .retain(|thread| !(thread.harness_id == harness_id && thread.thread_id == thread_id));
+        if hidden {
+            self.hidden_threads.push(ArchivedThread {
+                harness_id: harness_id.into(),
+                thread_id: thread_id.into(),
+            });
+        }
+    }
+
     pub fn add_project_path(&mut self, cwd: String) {
         self.hidden_project_paths.retain(|path| path != &cwd);
         self.deleted_project_paths.retain(|path| path != &cwd);
@@ -128,6 +148,7 @@ impl State {
         }
     }
 
+    #[allow(dead_code)]
     pub fn hide_project_path(&mut self, cwd: &str) {
         self.project_paths.retain(|path| path != cwd);
         if !self.hidden_project_paths.iter().any(|path| path == cwd) {
@@ -138,6 +159,7 @@ impl State {
         }
     }
 
+    #[allow(dead_code)]
     pub fn unhide_project_path(&mut self, cwd: &str) {
         self.hidden_project_paths.retain(|path| path != cwd);
         self.add_project_path(cwd.to_owned());

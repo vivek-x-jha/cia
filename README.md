@@ -115,19 +115,21 @@ Reload tmux and open with `prefix + g`.
 
 | Key | Action |
 | --- | --- |
-| `Tab`, `Shift-Tab`, `h`, `l`, `←`, `→` | Move focus between projects, chats, status, preview |
+| `Tab`, `Shift-Tab`, `l`, `←`, `→` | Move focus between projects, chats, status, preview |
 | `j`, `Ctrl+n`, `↓` | Move selection down, or scroll status when status is focused |
 | `k`, `Ctrl+p`, `↑` | Move selection up, or scroll status when status is focused |
 | `Ctrl+d`, `Ctrl+u` | Scroll focused status/preview pane |
 | `gg`, `G` | Jump to first/last item |
 | `Enter` | Switch to live pane or resume saved thread |
-| `N`, `n` | Pick a harness and start a named chat in the selected project |
-| `P` | Add/create a project path |
-| `H` | Unhide a hidden project from the hidden-project picker |
+| `n` | Pick a harness and start a named chat in the selected project |
+| `p` | Add/create a project path |
+| `H` | Toggle the hidden-chats picker |
+| `h` | Hide the selected saved chat |
+| `s` | Show the selected chat from the hidden-chats picker |
 | `/` | Search projects and chats |
-| `a` | Toggle active/all chats |
-| `A`, `U` | Archive/unarchive selected saved chat in CIA state |
-| `D` | Hide/delete project, or delete selected chat history file(s) and matching live pane. Project delete also kills matching tmux session(s). |
+| `A` | Toggle active/all chats |
+| `a`, `u` | Archive/unarchive selected saved chat in CIA state |
+| `d` | Delete project, or delete selected chat history file(s) and matching live pane. Project delete also kills matching tmux session(s). |
 | `r` | Refresh |
 | `?` | Help |
 | `q`, `Esc` | Quit |
@@ -138,7 +140,7 @@ Mouse support:
 - Double-click project to focus chats.
 - Double-click chat to open/resume.
 - Scroll over status or preview to scroll that pane.
-- Click top-bar actions for help/search/open/all/new/archive/delete.
+- Click statusline actions for help/search/open/all/new/hide/hidden/archive/delete.
 
 ## 🧠 How it works
 
@@ -147,7 +149,7 @@ CIA merges four read-only/runtime sources:
 1. `codex app-server` for Codex saved threads and previews.
 2. Pi session JSONL files for Pi saved chats and previews.
 3. tmux pane inventory for live processes, cwd, pane ids, and CIA metadata.
-4. CIA state for pane mappings, hidden projects, selected project, and local archive flags.
+4. CIA state for pane mappings, hidden chats/projects, selected project, and local archive flags.
 
 ```mermaid
 flowchart LR
@@ -308,9 +310,9 @@ $XDG_STATE_HOME/cia/state.json
 
 Fallback path: `~/.local/state/cia/state.json`.
 
-This state contains CIA pane mappings, hidden/deleted project suppression, selected project, and
+This state contains CIA pane mappings, hidden chats, hidden/deleted project suppression, selected project, and
 local archive flags. Delete actions are explicit: project delete removes a
-project directory and matching tmux session(s) without adding it to the hidden-project list; chat delete removes known chat history file(s) and matching
+project directory and matching tmux session(s) without adding it to the hidden-project list; chat hide/show only updates CIA state; chat delete removes known chat history file(s) and matching
 live tmux pane. CIA never mutates Codex/Pi history as part of listing or preview.
 
 ## 🧱 Architecture

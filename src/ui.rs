@@ -57,7 +57,9 @@ enum StatusAction {
     ToggleArchived,
     SetArchived,
     SetUnarchived,
-    UnhideProject,
+    ToggleHidden,
+    HideSelected,
+    ShowSelected,
     Delete,
     Help,
 }
@@ -69,6 +71,7 @@ struct PaneAreas {
     threads: Rect,
     preview: Rect,
     details: Rect,
+    actions: Rect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +85,6 @@ enum ClickTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeleteChoice {
     No,
-    Hide,
     Delete,
 }
 
@@ -118,6 +120,7 @@ pub struct App {
     preferred_project: Option<String>,
     projects: Vec<Project>,
     all_windows: Vec<Window>,
+    all_threads: Vec<Thread>,
     project_index: usize,
     row_index: usize,
     focus: Focus,
@@ -186,6 +189,7 @@ impl App {
             preferred_project,
             projects: Vec::new(),
             all_windows: Vec::new(),
+            all_threads: Vec::new(),
             project_index: 0,
             row_index: 0,
             focus: Focus::Projects,
@@ -252,9 +256,13 @@ impl App {
             thread.archived = self.state.is_archived(&thread.harness_id, &thread.id);
             all_threads.push(thread);
         }
+        self.all_threads = all_threads.clone();
         let threads: Vec<Thread> = all_threads
             .iter()
-            .filter(|thread| self.show_archived || !thread.archived)
+            .filter(|thread| {
+                (self.show_archived || !thread.archived)
+                    && !self.state.is_hidden(&thread.harness_id, &thread.id)
+            })
             .cloned()
             .collect();
         let archived_thread_ids: HashSet<(String, String)> = self
@@ -278,6 +286,27 @@ impl App {
                 })
             })
             .collect();
+        let hidden_thread_ids: HashSet<(String, String)> = self
+            .state
+            .hidden_threads
+            .iter()
+            .map(|thread| (thread.harness_id.clone(), thread.thread_id.clone()))
+            .collect();
+        let hidden_thread_names: HashSet<(String, String, String)> = all_threads
+            .iter()
+            .filter(|thread| self.state.is_hidden(&thread.harness_id, &thread.id))
+            .filter_map(|thread| {
+                thread.name.as_ref().map(|name| {
+                    (
+                        thread.harness_id.clone(),
+                        name.clone(),
+                        crate::tmux::normalized_path(&thread.cwd)
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                })
+            })
+            .collect();
         let mut windows = self.tmux.inventory()?;
         self.state.reconcile(&mut windows);
         self.all_windows = windows.clone();
@@ -285,13 +314,12 @@ impl App {
             windows.retain(|window| window.thread_id.is_some() || window.chat_title.is_some());
         } else {
             windows.retain(|window| {
-                !window_matches_archived_thread(
-                    window,
-                    &archived_thread_ids,
-                    &archived_thread_names,
-                )
+                !window_matches_thread(window, &archived_thread_ids, &archived_thread_names)
             });
         }
+        windows.retain(|window| {
+            !window_matches_thread(window, &hidden_thread_ids, &hidden_thread_names)
+        });
         self.projects = build_projects(threads, windows, &self.tmux);
         self.projects
             .retain(|project| !self.state.is_project_suppressed(&project.cwd));
@@ -589,14 +617,14 @@ impl App {
         self.new_project_mode = true;
     }
 
-    fn begin_unhide_project(&mut self) {
-        if self.state.hidden_project_paths.is_empty() && self.delete_notice.is_none() {
-            self.status = "No hidden projects".into();
+    fn toggle_hidden_menu(&mut self) {
+        if self.unhide_project_mode {
+            self.unhide_project_mode = false;
             return;
         }
         self.unhide_project_index = self
             .unhide_project_index
-            .min(self.state.hidden_project_paths.len().saturating_sub(1));
+            .min(self.hidden_threads().len().saturating_sub(1));
         self.unhide_project_mode = true;
     }
 
@@ -644,14 +672,37 @@ impl App {
         self.select_new_chat_harness();
     }
 
+    fn selected_thread(&self) -> Option<Thread> {
+        match self.current_rows().get(self.row_index).cloned() {
+            Some(Row::Thread { thread, .. }) => Some(*thread),
+            _ => None,
+        }
+    }
+
     fn set_selected_archived(&mut self, archived: bool) {
-        let Some(Row::Thread { thread, .. }) = self.current_rows().get(self.row_index).cloned()
-        else {
+        let Some(thread) = self.selected_thread() else {
             self.status = "Select a saved chat first".into();
             return;
         };
         self.state
             .set_archived(&thread.harness_id, &thread.id, archived);
+        if let Err(error) = self.state.save(&self.state_path) {
+            self.status = error.to_string();
+            return;
+        }
+        self.refresh_view();
+    }
+
+    fn set_selected_hidden(&mut self, hidden: bool) {
+        if self.unhide_project_mode {
+            return;
+        }
+        let Some(thread) = self.selected_thread() else {
+            self.status = "Select a saved chat first".into();
+            return;
+        };
+        self.state
+            .set_hidden(&thread.harness_id, &thread.id, hidden);
         if let Err(error) = self.state.save(&self.state_path) {
             self.status = error.to_string();
             return;
@@ -694,19 +745,15 @@ impl App {
         let mut success_status = None;
         let result = match (prompt.target, prompt.choice) {
             (_, DeleteChoice::No) => Ok(()),
-            (DeleteTarget::Project { cwd, .. }, DeleteChoice::Hide) => {
-                success_status = Some(format!("Hidden project {}", display_dir_path(&cwd)));
-                self.hide_project(&cwd)
-            }
             (DeleteTarget::Project { cwd, .. }, DeleteChoice::Delete) => {
-                success_status = None;
-                self.delete_project_from_disk(&cwd)
+                let result = self.delete_project_from_disk(&cwd);
+                success_status = self.delete_notice.clone();
+                result
             }
             (DeleteTarget::Chat { thread }, DeleteChoice::Delete) => {
                 success_status = Some(format!("Deleted chat {}", thread.title()));
                 self.delete_chat(&thread)
             }
-            (DeleteTarget::Chat { .. }, DeleteChoice::Hide) => Ok(()),
         };
         match result {
             Ok(()) => {
@@ -717,11 +764,6 @@ impl App {
             }
             Err(error) => self.status = error.to_string(),
         }
-    }
-
-    fn hide_project(&mut self, cwd: &str) -> Result<()> {
-        self.state.hide_project_path(cwd);
-        self.state.save(&self.state_path)
     }
 
     fn delete_project_from_disk(&mut self, cwd: &str) -> Result<()> {
@@ -812,42 +854,54 @@ impl App {
             StatusAction::ToggleArchived => self.toggle_archived(),
             StatusAction::SetArchived => self.set_selected_archived(true),
             StatusAction::SetUnarchived => self.set_selected_archived(false),
-            StatusAction::UnhideProject => self.begin_unhide_project(),
+            StatusAction::ToggleHidden => self.toggle_hidden_menu(),
+            StatusAction::HideSelected => self.set_selected_hidden(true),
+            StatusAction::ShowSelected => self.show_selected_hidden_thread(),
             StatusAction::Delete => self.begin_delete(),
             StatusAction::Help => self.show_help = true,
         }
     }
 
+    fn hidden_threads(&self) -> Vec<Thread> {
+        self.state
+            .hidden_threads
+            .iter()
+            .filter_map(|hidden| {
+                self.all_threads
+                    .iter()
+                    .find(|thread| {
+                        thread.harness_id == hidden.harness_id && thread.id == hidden.thread_id
+                    })
+                    .cloned()
+            })
+            .collect()
+    }
+
     fn submit_unhide_project(&mut self) {
-        let Some(cwd) = self
-            .state
-            .hidden_project_paths
-            .get(self.unhide_project_index)
-            .cloned()
-        else {
-            self.unhide_project_mode = false;
+        self.show_selected_hidden_thread();
+    }
+
+    fn show_selected_hidden_thread(&mut self) {
+        let hidden_threads = self.hidden_threads();
+        let Some(thread) = hidden_threads.get(self.unhide_project_index).cloned() else {
             return;
         };
-        self.state.unhide_project_path(&cwd);
-        self.state.last_project = Some(cwd.clone());
+        self.state.set_hidden(&thread.harness_id, &thread.id, false);
         if let Err(error) = self.state.save(&self.state_path) {
             self.status = error.to_string();
             return;
         }
-        self.unhide_project_mode = false;
         self.refresh_view();
-        if let Some(index) = self.projects.iter().position(|project| project.cwd == cwd) {
-            self.project_index = index;
-            self.row_index = 0;
-            self.focus = Focus::Projects;
-            self.load_preview();
-        }
+        self.unhide_project_index = self
+            .unhide_project_index
+            .min(self.hidden_threads().len().saturating_sub(1));
+        self.unhide_project_mode = !self.hidden_threads().is_empty();
     }
 
     fn move_unhide_project(&mut self, delta: isize) {
         self.unhide_project_index = move_index(
             self.unhide_project_index,
-            self.state.hidden_project_paths.len(),
+            self.hidden_threads().len(),
             delta,
         );
     }
@@ -958,7 +1012,7 @@ impl App {
                     }
                     self.confirm_delete();
                 }
-                KeyCode::Char('d') | KeyCode::Char('D') => {
+                KeyCode::Char('d') => {
                     if let Some(prompt) = &mut self.delete_prompt {
                         prompt.choice = DeleteChoice::Delete;
                     }
@@ -971,7 +1025,11 @@ impl App {
         if self.unhide_project_mode {
             match key.code {
                 KeyCode::Esc => self.unhide_project_mode = false,
-                KeyCode::Enter => self.submit_unhide_project(),
+                KeyCode::Char('s') => self.submit_unhide_project(),
+                KeyCode::Char('H') => self.toggle_hidden_menu(),
+                KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    self.toggle_hidden_menu();
+                }
                 KeyCode::Up | KeyCode::Char('k') => self.move_unhide_project(-1),
                 KeyCode::Down | KeyCode::Char('j') => self.move_unhide_project(1),
                 KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1099,11 +1157,21 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => self.running = false,
             KeyCode::Char('?') => self.show_help = true,
             KeyCode::Char('/') => self.search_mode = true,
-            KeyCode::Char('a') => self.toggle_archived(),
-            KeyCode::Char('A') => self.set_selected_archived(true),
-            KeyCode::Char('U') => self.set_selected_archived(false),
-            KeyCode::Char('D') => self.begin_delete(),
-            KeyCode::Char('H') => self.begin_unhide_project(),
+            KeyCode::Char('A') if key.modifiers == KeyModifiers::NONE => self.toggle_archived(),
+            KeyCode::Char('a') if key.modifiers == KeyModifiers::NONE => {
+                self.set_selected_archived(true)
+            }
+            KeyCode::Char('u') if key.modifiers == KeyModifiers::NONE => {
+                self.set_selected_archived(false)
+            }
+            KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => self.begin_delete(),
+            KeyCode::Char('H') => self.toggle_hidden_menu(),
+            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.toggle_hidden_menu()
+            }
+            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
+                self.set_selected_hidden(true)
+            }
             KeyCode::Char('r') => self.refresh_view(),
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_next(1)
@@ -1117,8 +1185,8 @@ impl App {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.scroll_focused(-8)
             }
-            KeyCode::Char('P') => self.begin_new_project(),
-            KeyCode::Char('N') | KeyCode::Char('n') => self.begin_new_thread(),
+            KeyCode::Char('p') if key.modifiers == KeyModifiers::NONE => self.begin_new_project(),
+            KeyCode::Char('n') if key.modifiers == KeyModifiers::NONE => self.begin_new_thread(),
             KeyCode::Char('G') => self.select_boundary(true),
             KeyCode::Enter => self.activate(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(1),
@@ -1165,6 +1233,13 @@ impl App {
             return;
         }
         if self.new_project_mode || self.unhide_project_mode {
+            if self.unhide_project_mode && contains(areas.actions, x, y) {
+                if let Some(action) =
+                    status_action_at(self, x.saturating_sub(areas.actions.x), areas.actions.width)
+                {
+                    self.run_status_action(action);
+                }
+            }
             self.last_click = None;
             return;
         }
@@ -1179,7 +1254,16 @@ impl App {
         }
         if contains(areas.status, x, y) {
             if let Some(action) =
-                status_action_at(self, x.saturating_sub(areas.status.x), areas.status.width)
+                status_action_left_at(self, x.saturating_sub(areas.status.x), areas.status.width)
+            {
+                self.run_status_action(action);
+            }
+            self.last_click = None;
+            return;
+        }
+        if contains(areas.actions, x, y) {
+            if let Some(action) =
+                status_action_at(self, x.saturating_sub(areas.actions.x), areas.actions.width)
             {
                 self.run_status_action(action);
             }
@@ -1324,6 +1408,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     let area = frame.area();
     let areas = pane_areas(area);
     draw_status_bar(frame, areas.status, app, theme);
+    draw_status_actions(frame, areas.actions, app, theme);
     draw_projects(frame, areas.projects, app, theme);
     draw_threads(frame, areas.threads, app, theme);
     draw_preview(frame, areas.preview, app, theme);
@@ -1346,7 +1431,12 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
 }
 
 fn pane_areas(area: Rect) -> PaneAreas {
-    let outer = Layout::vertical([Constraint::Length(1), Constraint::Min(5)]).split(area);
+    let outer = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(5),
+        Constraint::Length(1),
+    ])
+    .split(area);
     let panes = if area.width >= 100 {
         let rows = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer[1]);
@@ -1371,6 +1461,7 @@ fn pane_areas(area: Rect) -> PaneAreas {
         threads: panes[1],
         preview: panes[2],
         details: panes[3],
+        actions: outer[2],
     }
 }
 
@@ -1405,33 +1496,6 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
     let status_style = Style::default().fg(theme.foreground);
     frame.render_widget(Block::default().style(status_style), area);
 
-    let mut right_spans = Vec::new();
-    for (index, (label, action)) in status_actions_right(app).into_iter().enumerate() {
-        if index > 0 {
-            right_spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
-        }
-        right_spans.push(Span::styled(
-            label,
-            Style::default().fg(status_color(action, theme)),
-        ));
-    }
-    let right_width = right_spans
-        .iter()
-        .map(|span| span.content.chars().count() as u16)
-        .sum::<u16>()
-        .min(area.width);
-    let right_area = Rect {
-        x: area.x + area.width.saturating_sub(right_width),
-        y: area.y,
-        width: right_width,
-        height: area.height,
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(right_spans))
-            .style(status_style)
-            .alignment(Alignment::Right),
-        right_area,
-    );
     let left_width = left_spans
         .iter()
         .map(|span| span.content.chars().count() as u16)
@@ -1441,7 +1505,7 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
         x: area.x,
         y: area.y,
         width: left_width,
-        height: area.height,
+        height: 1,
     };
     frame.render_widget(
         Paragraph::new(Line::from(left_spans)).style(status_style),
@@ -1449,7 +1513,7 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
     );
     if let Some(message) = status_message {
         let message_width = message.chars().count() as u16;
-        let message_area = status_message_area(area, left_width, right_width, message_width);
+        let message_area = status_message_area(area, left_width, 0, message_width);
         if message_area.width > 0 {
             if message_area == area {
                 frame.render_widget(
@@ -1466,6 +1530,28 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
             );
         }
     }
+}
+
+fn draw_status_actions(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
+    let status_style = Style::default().fg(theme.foreground);
+    frame.render_widget(Block::default().style(status_style), area);
+
+    let mut spans = Vec::new();
+    for (index, (label, action)) in status_actions_right(app).into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
+        }
+        spans.push(Span::styled(
+            label,
+            Style::default().fg(status_color(action, theme)),
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(spans))
+            .style(status_style)
+            .alignment(Alignment::Center),
+        area,
+    );
 }
 
 fn draw_projects(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
@@ -1972,13 +2058,14 @@ fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
             "Act",
             &[
                 ("Enter", "open or resume"),
-                ("N / n", "new chat"),
-                ("P", "new project"),
+                ("n", "new chat"),
+                ("p", "new project"),
                 ("/", "search"),
-                ("a", "active / all"),
-                ("A / U", "archive / unarchive"),
-                ("D", "delete or hide"),
-                ("H", "unhide project"),
+                ("A", "active / all"),
+                ("a / u", "archive / unarchive"),
+                ("h / s", "hide / show chat"),
+                ("H", "toggle hidden chats"),
+                ("d", "delete"),
                 ("r", "refresh"),
                 ("q / Esc", "quit"),
             ],
@@ -2033,10 +2120,10 @@ fn draw_delete_prompt(
     frame.render_widget(Clear, popup);
     let (title, warning) = match &prompt.target {
         DeleteTarget::Project { name, cwd } => (
-            format!("Remove project {name}?"),
+            format!("Delete project {name}?"),
             Line::from(vec![
                 Span::styled(
-                    "Hide removes from view; Delete removes from disk: ",
+                    "Will delete from disk: ",
                     Style::default().fg(theme.foreground),
                 ),
                 Span::styled(
@@ -2054,13 +2141,12 @@ fn draw_delete_prompt(
         ),
     };
     let no_style = delete_choice_style(prompt.choice, DeleteChoice::No, theme);
-    let hide_style = delete_choice_style(prompt.choice, DeleteChoice::Hide, theme);
     let delete_style = delete_choice_style(prompt.choice, DeleteChoice::Delete, theme);
     let text = Text::from(vec![
         Line::styled(title, Style::default().fg(theme.error)),
         warning,
         Line::from(""),
-        delete_choice_line(prompt, no_style, hide_style, delete_style),
+        delete_choice_line(prompt, no_style, delete_style),
     ]);
     frame.render_widget(
         Paragraph::new(text)
@@ -2093,15 +2179,12 @@ fn delete_choice_style(
 fn delete_choice_line(
     prompt: &DeletePrompt,
     no_style: Style,
-    hide_style: Style,
     delete_style: Style,
 ) -> Line<'static> {
     match prompt.target {
         DeleteTarget::Project { .. } => Line::from(vec![
             Span::raw("  "),
             Span::styled(" No ", no_style),
-            Span::raw("  "),
-            Span::styled(" Hide ", hide_style),
             Span::raw("  "),
             Span::styled(" Delete ", delete_style),
         ]),
@@ -2136,40 +2219,39 @@ fn draw_unhide_project_prompt(
     app: &App,
     theme: ResolvedTheme,
 ) {
-    let height = (app.state.hidden_project_paths.len() as u16 + 4).min(20);
+    let hidden_threads = app.hidden_threads();
+    let height = (hidden_threads.len() as u16 + 4).clamp(5, 20);
     let popup = centered(area, 86, height);
     frame.render_widget(Clear, popup);
     let visible_rows = popup.height.saturating_sub(2) as usize;
     let start = app
         .unhide_project_index
         .saturating_sub(visible_rows.saturating_sub(1));
-    let items: Vec<ListItem> = app
-        .state
-        .hidden_project_paths
+    let items: Vec<ListItem> = hidden_threads
         .iter()
         .skip(start)
         .take(visible_rows)
-        .map(|path| {
-            ListItem::new(Line::styled(
-                display_dir_path(path),
-                Style::default().fg(theme.status_project),
-            ))
+        .map(|thread| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    thread.title(),
+                    Style::default().fg(theme.status_thread_name),
+                ),
+                Span::styled(
+                    format!("  {}", display_dir_path(&thread.cwd)),
+                    Style::default().fg(theme.status_project),
+                ),
+            ]))
         })
         .collect();
-    let mut state = ListState::default().with_selected(Some(app.unhide_project_index - start));
-    let title = app
-        .delete_notice
-        .as_deref()
-        .unwrap_or("Unhide project (Enter)");
-    let title_style = if app.delete_notice.is_some() {
-        Style::default()
-            .fg(theme.error)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.title_focused)
-    };
+    let selected_index = (!hidden_threads.is_empty()).then_some(app.unhide_project_index - start);
+    let mut state = ListState::default().with_selected(selected_index);
+    let title = "Hidden Chats";
     let block = Block::default()
-        .title(Line::styled(format!(" {title} "), title_style))
+        .title(Line::styled(
+            format!(" {title} "),
+            Style::default().fg(theme.title_focused),
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border_focused))
         .style(Style::default().fg(theme.foreground));
@@ -2488,15 +2570,15 @@ fn remove_path_from_disk(path: &Path) -> Result<()> {
     }
 }
 
-fn window_matches_archived_thread(
+fn window_matches_thread(
     window: &Window,
-    archived_thread_ids: &HashSet<(String, String)>,
-    archived_thread_names: &HashSet<(String, String, String)>,
+    thread_ids: &HashSet<(String, String)>,
+    thread_names: &HashSet<(String, String, String)>,
 ) -> bool {
     if let (Some(harness_id), Some(thread_id)) =
         (window.harness_id.as_ref(), window.thread_id.as_ref())
     {
-        return archived_thread_ids.contains(&(harness_id.clone(), thread_id.clone()));
+        return thread_ids.contains(&(harness_id.clone(), thread_id.clone()));
     }
     if let (Some(harness_id), Some(chat_title)) =
         (window.harness_id.as_ref(), window.chat_title.as_ref())
@@ -2504,7 +2586,7 @@ fn window_matches_archived_thread(
         let cwd = crate::tmux::normalized_path(&window.cwd)
             .to_string_lossy()
             .into_owned();
-        return archived_thread_names.contains(&(harness_id.clone(), chat_title.clone(), cwd));
+        return thread_names.contains(&(harness_id.clone(), chat_title.clone(), cwd));
     }
     false
 }
@@ -2592,20 +2674,19 @@ fn status_message_area(area: Rect, left_width: u16, right_width: u16, message_wi
     }
 }
 
-fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
+fn status_action_left_at(app: &App, x: u16, _width: u16) -> Option<StatusAction> {
     let project_count = app.projects.len();
     let thread_count = app
         .projects
         .iter()
         .map(|project| project.threads.len())
         .sum::<usize>();
-    let mut offset = 0usize;
-    offset += 1;
-    offset += format!(" {project_count}").chars().count();
-    offset += STATUS_GAP.chars().count();
-    offset += format!("󰻞 {thread_count}").chars().count();
+    let mut cursor = 0usize;
+    cursor += 1;
+    cursor += format!(" {project_count}").chars().count();
+    cursor += STATUS_GAP.chars().count();
+    cursor += format!("󰻞 {thread_count}").chars().count();
 
-    let mut cursor = offset;
     for (label, action) in status_actions_left(app) {
         cursor += STATUS_GAP.chars().count();
         let end = cursor + label.chars().count();
@@ -2614,10 +2695,10 @@ fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
         }
         cursor = end;
     }
-    if (x as usize) < cursor.min(width as usize) {
-        return None;
-    }
+    None
+}
 
+fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
     let right_actions = status_actions_right(app);
     let right_width: usize = right_actions
         .iter()
@@ -2631,7 +2712,7 @@ fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
                 }
         })
         .sum();
-    let mut cursor = (width as usize).saturating_sub(right_width);
+    let mut cursor = (width as usize).saturating_sub(right_width) / 2;
     for (index, (label, action)) in right_actions.into_iter().enumerate() {
         if index > 0 {
             cursor += STATUS_GAP.chars().count();
@@ -2664,18 +2745,24 @@ fn status_search_label(app: &App) -> String {
 
 fn status_actions_right(app: &App) -> Vec<(&'static str, StatusAction)> {
     let archive_action = if app.show_archived {
-        (" (U)narchive", StatusAction::SetUnarchived)
+        (" (u)narchive", StatusAction::SetUnarchived)
     } else {
-        (" (A)rchive", StatusAction::SetArchived)
+        (" (a)rchive", StatusAction::SetArchived)
+    };
+    let visibility_action = if app.unhide_project_mode {
+        ("󰈈 (s)how", StatusAction::ShowSelected)
+    } else {
+        (" (h)ide", StatusAction::HideSelected)
     };
     vec![
         ("󰷏 (enter)", StatusAction::Open),
-        ("󰁌 (a)ll", StatusAction::ToggleArchived),
-        (" (P)roject", StatusAction::NewProject),
-        (" (N)ew Chat", StatusAction::New),
-        (" (H)idden", StatusAction::UnhideProject),
+        ("󰁌 (A)ll", StatusAction::ToggleArchived),
+        (" (p)roject", StatusAction::NewProject),
+        (" (n)ew chat", StatusAction::New),
+        visibility_action,
+        (" (H)idden", StatusAction::ToggleHidden),
         archive_action,
-        (" (D)elete", StatusAction::Delete),
+        (" (d)elete", StatusAction::Delete),
     ]
 }
 
@@ -2688,7 +2775,9 @@ fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
         StatusAction::ToggleArchived => theme.status_archive,
         StatusAction::SetArchived => theme.status_archive_action,
         StatusAction::SetUnarchived => theme.status_unarchive,
-        StatusAction::UnhideProject => theme.status_updated,
+        StatusAction::ToggleHidden => theme.status_updated,
+        StatusAction::HideSelected => Color::Yellow,
+        StatusAction::ShowSelected => Color::Magenta,
         StatusAction::Delete => theme.status_delete,
         StatusAction::Help => theme.status_help,
     }
@@ -2744,18 +2833,13 @@ fn deleted_chat_agent_pane_matches(
     chat_title == thread.title() || thread.name.as_deref() == Some(chat_title)
 }
 
-fn delete_choices(target: &DeleteTarget) -> &'static [DeleteChoice] {
-    match target {
-        DeleteTarget::Project { .. } => {
-            &[DeleteChoice::No, DeleteChoice::Hide, DeleteChoice::Delete]
-        }
-        DeleteTarget::Chat { .. } => &[DeleteChoice::No, DeleteChoice::Delete],
-    }
+fn delete_choices(_target: &DeleteTarget) -> &'static [DeleteChoice] {
+    &[DeleteChoice::No, DeleteChoice::Delete]
 }
 
 fn default_delete_choice(target: &DeleteTarget) -> DeleteChoice {
     match target {
-        DeleteTarget::Project { .. } => DeleteChoice::Hide,
+        DeleteTarget::Project { .. } => DeleteChoice::Delete,
         DeleteTarget::Chat { .. } => DeleteChoice::Delete,
     }
 }
@@ -2778,7 +2862,7 @@ fn next_delete_choice(choice: DeleteChoice, target: &DeleteTarget) -> DeleteChoi
     choices[move_index(index, choices.len(), 1)]
 }
 
-fn delete_choice_at(x: u16, y: u16, popup: Rect, target: &DeleteTarget) -> Option<DeleteChoice> {
+fn delete_choice_at(x: u16, y: u16, popup: Rect, _target: &DeleteTarget) -> Option<DeleteChoice> {
     if y != popup.y.saturating_add(4) {
         return None;
     }
@@ -2788,20 +2872,8 @@ fn delete_choice_at(x: u16, y: u16, popup: Rect, target: &DeleteTarget) -> Optio
         return Some(DeleteChoice::No);
     }
     let second_start = popup.x.saturating_add(9);
-    if matches!(target, DeleteTarget::Chat { .. }) {
-        let second_end = second_start.saturating_add(8);
-        if x >= second_start && x < second_end {
-            return Some(DeleteChoice::Delete);
-        }
-        return None;
-    }
-    let hide_end = second_start.saturating_add(6);
-    if x >= second_start && x < hide_end {
-        return Some(DeleteChoice::Hide);
-    }
-    let delete_start = popup.x.saturating_add(17);
-    let delete_end = delete_start.saturating_add(8);
-    if x >= delete_start && x < delete_end {
+    let second_end = second_start.saturating_add(8);
+    if x >= second_start && x < second_end {
         return Some(DeleteChoice::Delete);
     }
     None
@@ -2899,12 +2971,9 @@ mod tests {
         );
         assert_eq!(
             delete_choice_at(19, 9, popup, &project),
-            Some(DeleteChoice::Hide)
-        );
-        assert_eq!(
-            delete_choice_at(28, 9, popup, &project),
             Some(DeleteChoice::Delete)
         );
+        assert_eq!(delete_choice_at(28, 9, popup, &project), None);
         assert_eq!(
             delete_choice_at(19, 9, popup, &chat),
             Some(DeleteChoice::Delete)
