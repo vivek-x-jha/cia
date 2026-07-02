@@ -57,6 +57,7 @@ enum StatusAction {
     ToggleArchived,
     SetArchived,
     SetUnarchived,
+    UnhideProject,
     Delete,
     Help,
 }
@@ -114,6 +115,7 @@ pub struct App {
     tmux: TmuxClient,
     state: State,
     state_path: PathBuf,
+    preferred_project: Option<String>,
     projects: Vec<Project>,
     all_windows: Vec<Window>,
     project_index: usize,
@@ -124,6 +126,8 @@ pub struct App {
     query: String,
     new_project_mode: bool,
     new_project_path: String,
+    unhide_project_mode: bool,
+    unhide_project_index: usize,
     new_chat_mode: bool,
     new_chat_picking_harness: bool,
     new_chat_harness_index: usize,
@@ -133,6 +137,7 @@ pub struct App {
     preview_scroll: u16,
     status_scroll: u16,
     status: String,
+    delete_notice: Option<String>,
     show_help: bool,
     delete_prompt: Option<DeletePrompt>,
     last_click: Option<LastClick>,
@@ -165,6 +170,11 @@ impl App {
             .or_else(|_| std::env::var("USERNAME"))
             .unwrap_or_else(|_| "You".into());
         let show_archived = config.ui.archived_default;
+        let preferred_project = preferred_project.map(|path| {
+            crate::tmux::normalized_path(path)
+                .to_string_lossy()
+                .into_owned()
+        });
         let mut app = Self {
             config,
             cia_command,
@@ -173,6 +183,7 @@ impl App {
             tmux,
             state,
             state_path,
+            preferred_project,
             projects: Vec::new(),
             all_windows: Vec::new(),
             project_index: 0,
@@ -183,6 +194,8 @@ impl App {
             query: String::new(),
             new_project_mode: false,
             new_project_path: String::new(),
+            unhide_project_mode: false,
+            unhide_project_index: 0,
             new_chat_mode: false,
             new_chat_picking_harness: false,
             new_chat_harness_index: 0,
@@ -192,6 +205,7 @@ impl App {
             preview_scroll: 0,
             status_scroll: 0,
             status: String::new(),
+            delete_notice: None,
             show_help: false,
             delete_prompt: None,
             last_click: None,
@@ -199,11 +213,8 @@ impl App {
             running: true,
         };
         app.refresh()?;
-        if let Some(path) = preferred_project {
-            let path = crate::tmux::normalized_path(path)
-                .to_string_lossy()
-                .into_owned();
-            if let Some(index) = app.projects.iter().position(|project| project.cwd == path) {
+        if let Some(path) = &app.preferred_project {
+            if let Some(index) = app.projects.iter().position(|project| &project.cwd == path) {
                 app.project_index = index;
             }
         } else if let Some(last) = &app.state.last_project {
@@ -283,16 +294,13 @@ impl App {
         }
         self.projects = build_projects(threads, windows, &self.tmux);
         self.projects
-            .retain(|project| !self.state.is_project_hidden(&project.cwd));
-        for cwd in &self.state.project_paths {
-            if !self.projects.iter().any(|project| &project.cwd == cwd) {
-                self.projects.push(Project {
-                    name: project_name(cwd),
-                    cwd: cwd.clone(),
-                    recency: 0,
-                    threads: Vec::new(),
-                    agents: Vec::new(),
-                });
+            .retain(|project| !self.state.is_project_suppressed(&project.cwd));
+        for cwd in self.state.project_paths.clone() {
+            self.insert_project_path(cwd);
+        }
+        if let Some(cwd) = self.preferred_project.clone() {
+            if !self.state.is_project_suppressed(&cwd) {
+                self.insert_project_path(cwd);
             }
         }
         self.projects
@@ -304,18 +312,28 @@ impl App {
             .row_index
             .min(self.current_rows().len().saturating_sub(1));
         self.state.save(&self.state_path)?;
-        self.status = format!(
+        self.status = self.count_status();
+        if !errors.is_empty() {
+            self.status = errors.join("; ");
+        }
+        Ok(())
+    }
+
+    fn count_status(&self) -> String {
+        format!(
             "{} projects · {} threads",
             self.projects.len(),
             self.projects
                 .iter()
                 .map(|project| project.threads.len())
                 .sum::<usize>()
-        );
-        if !errors.is_empty() {
-            self.status = errors.join("; ");
+        )
+    }
+
+    fn clear_status_message(&mut self) {
+        if self.status != self.count_status() {
+            self.status = self.count_status();
         }
-        Ok(())
     }
 
     fn harness(&self, harness_id: &str) -> Option<&Harness> {
@@ -332,6 +350,18 @@ impl App {
 
     fn current_project(&self) -> Option<&Project> {
         self.projects.get(self.project_index)
+    }
+
+    fn insert_project_path(&mut self, cwd: String) {
+        if !self.projects.iter().any(|project| project.cwd == cwd) {
+            self.projects.push(Project {
+                name: project_name(&cwd),
+                cwd,
+                recency: 0,
+                threads: Vec::new(),
+                agents: Vec::new(),
+            });
+        }
     }
 
     fn visible_project_indices(&self) -> Vec<usize> {
@@ -559,6 +589,17 @@ impl App {
         self.new_project_mode = true;
     }
 
+    fn begin_unhide_project(&mut self) {
+        if self.state.hidden_project_paths.is_empty() && self.delete_notice.is_none() {
+            self.status = "No hidden projects".into();
+            return;
+        }
+        self.unhide_project_index = self
+            .unhide_project_index
+            .min(self.state.hidden_project_paths.len().saturating_sub(1));
+        self.unhide_project_mode = true;
+    }
+
     fn begin_new_thread(&mut self) {
         self.new_chat_name.clear();
         self.new_chat_harness_error = None;
@@ -650,18 +691,29 @@ impl App {
         let Some(prompt) = self.delete_prompt.take() else {
             return;
         };
+        let mut success_status = None;
         let result = match (prompt.target, prompt.choice) {
             (_, DeleteChoice::No) => Ok(()),
-            (DeleteTarget::Project { cwd, .. }, DeleteChoice::Hide) => self.hide_project(&cwd),
+            (DeleteTarget::Project { cwd, .. }, DeleteChoice::Hide) => {
+                success_status = Some(format!("Hidden project {}", display_dir_path(&cwd)));
+                self.hide_project(&cwd)
+            }
             (DeleteTarget::Project { cwd, .. }, DeleteChoice::Delete) => {
+                success_status = None;
                 self.delete_project_from_disk(&cwd)
             }
-            (DeleteTarget::Chat { thread }, DeleteChoice::Delete) => self.delete_chat(&thread),
+            (DeleteTarget::Chat { thread }, DeleteChoice::Delete) => {
+                success_status = Some(format!("Deleted chat {}", thread.title()));
+                self.delete_chat(&thread)
+            }
             (DeleteTarget::Chat { .. }, DeleteChoice::Hide) => Ok(()),
         };
         match result {
             Ok(()) => {
                 self.refresh_view();
+                if let Some(status) = success_status {
+                    self.status = status;
+                }
             }
             Err(error) => self.status = error.to_string(),
         }
@@ -673,9 +725,42 @@ impl App {
     }
 
     fn delete_project_from_disk(&mut self, cwd: &str) -> Result<()> {
+        let killed = self.kill_project_tmux_sessions(cwd)?;
         remove_path_from_disk(Path::new(cwd))?;
-        self.state.hide_project_path(cwd);
-        self.state.save(&self.state_path)
+        self.state.delete_project_path(cwd);
+        self.state.save(&self.state_path)?;
+        self.delete_notice = Some(if killed > 0 {
+            format!(
+                "Deleted {} and killed {killed} tmux session(s)",
+                display_dir_path(cwd)
+            )
+        } else {
+            format!("Deleted {}", display_dir_path(cwd))
+        });
+        Ok(())
+    }
+
+    fn kill_project_tmux_sessions(&mut self, cwd: &str) -> Result<usize> {
+        let cwd = crate::tmux::normalized_path(cwd)
+            .to_string_lossy()
+            .into_owned();
+        let sessions: HashSet<String> = self
+            .tmux
+            .inventory()?
+            .into_iter()
+            .filter(|window| {
+                crate::tmux::normalized_path(&window.cwd)
+                    .to_string_lossy()
+                    .as_ref()
+                    == cwd
+            })
+            .map(|window| window.session)
+            .collect();
+        let count = sessions.len();
+        for session in sessions {
+            self.tmux.kill_session(&session)?;
+        }
+        Ok(count)
     }
 
     fn delete_chat(&mut self, thread: &Thread) -> Result<()> {
@@ -727,9 +812,44 @@ impl App {
             StatusAction::ToggleArchived => self.toggle_archived(),
             StatusAction::SetArchived => self.set_selected_archived(true),
             StatusAction::SetUnarchived => self.set_selected_archived(false),
+            StatusAction::UnhideProject => self.begin_unhide_project(),
             StatusAction::Delete => self.begin_delete(),
             StatusAction::Help => self.show_help = true,
         }
+    }
+
+    fn submit_unhide_project(&mut self) {
+        let Some(cwd) = self
+            .state
+            .hidden_project_paths
+            .get(self.unhide_project_index)
+            .cloned()
+        else {
+            self.unhide_project_mode = false;
+            return;
+        };
+        self.state.unhide_project_path(&cwd);
+        self.state.last_project = Some(cwd.clone());
+        if let Err(error) = self.state.save(&self.state_path) {
+            self.status = error.to_string();
+            return;
+        }
+        self.unhide_project_mode = false;
+        self.refresh_view();
+        if let Some(index) = self.projects.iter().position(|project| project.cwd == cwd) {
+            self.project_index = index;
+            self.row_index = 0;
+            self.focus = Focus::Projects;
+            self.load_preview();
+        }
+    }
+
+    fn move_unhide_project(&mut self, delta: isize) {
+        self.unhide_project_index = move_index(
+            self.unhide_project_index,
+            self.state.hidden_project_paths.len(),
+            delta,
+        );
     }
 
     fn submit_new_project(&mut self) {
@@ -816,6 +936,7 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
+        self.clear_status_message();
         if self.delete_prompt.is_some() {
             match key.code {
                 KeyCode::Esc => self.delete_prompt = None,
@@ -842,6 +963,22 @@ impl App {
                         prompt.choice = DeleteChoice::Delete;
                     }
                     self.confirm_delete();
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.unhide_project_mode {
+            match key.code {
+                KeyCode::Esc => self.unhide_project_mode = false,
+                KeyCode::Enter => self.submit_unhide_project(),
+                KeyCode::Up | KeyCode::Char('k') => self.move_unhide_project(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.move_unhide_project(1),
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.move_unhide_project(1);
+                }
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.move_unhide_project(-1);
                 }
                 _ => {}
             }
@@ -966,6 +1103,7 @@ impl App {
             KeyCode::Char('A') => self.set_selected_archived(true),
             KeyCode::Char('U') => self.set_selected_archived(false),
             KeyCode::Char('D') => self.begin_delete(),
+            KeyCode::Char('H') => self.begin_unhide_project(),
             KeyCode::Char('r') => self.refresh_view(),
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_next(1)
@@ -979,8 +1117,8 @@ impl App {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.scroll_focused(-8)
             }
-            KeyCode::Char('N') => self.begin_new_project(),
-            KeyCode::Char('n') => self.begin_new_thread(),
+            KeyCode::Char('P') => self.begin_new_project(),
+            KeyCode::Char('N') | KeyCode::Char('n') => self.begin_new_thread(),
             KeyCode::Char('G') => self.select_boundary(true),
             KeyCode::Enter => self.activate(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(1),
@@ -996,6 +1134,7 @@ impl App {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
+        self.clear_status_message();
         let Ok((width, height)) = terminal_size() else {
             return;
         };
@@ -1025,7 +1164,7 @@ impl App {
             self.handle_delete_prompt_click(x, y);
             return;
         }
-        if self.new_project_mode {
+        if self.new_project_mode || self.unhide_project_mode {
             self.last_click = None;
             return;
         }
@@ -1195,6 +1334,9 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     if app.new_project_mode {
         draw_new_project_prompt(frame, area, app, theme);
     }
+    if app.unhide_project_mode {
+        draw_unhide_project_prompt(frame, area, app, theme);
+    }
     if app.new_chat_mode {
         draw_new_chat_prompt(frame, area, app, theme);
     }
@@ -1239,7 +1381,8 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
         .iter()
         .map(|project| project.threads.len())
         .sum::<usize>();
-    let count_status = format!("{project_count} projects · {thread_count} threads");
+    let count_status = app.count_status();
+    let status_message = (app.status != count_status).then(|| app.status.clone());
     let mut left_spans = vec![
         Span::styled(" ", Style::default().fg(theme.muted)),
         Span::styled(
@@ -1252,13 +1395,6 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
             Style::default().fg(theme.status_threads),
         ),
     ];
-    if app.status != count_status {
-        left_spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
-        left_spans.push(Span::styled(
-            app.status.clone(),
-            Style::default().fg(theme.error),
-        ));
-    }
     for (label, action) in status_actions_left(app) {
         left_spans.push(Span::styled(STATUS_GAP, Style::default().fg(theme.muted)));
         left_spans.push(Span::styled(
@@ -1311,6 +1447,25 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: Res
         Paragraph::new(Line::from(left_spans)).style(status_style),
         left_area,
     );
+    if let Some(message) = status_message {
+        let message_width = message.chars().count() as u16;
+        let message_area = status_message_area(area, left_width, right_width, message_width);
+        if message_area.width > 0 {
+            if message_area == area {
+                frame.render_widget(
+                    Paragraph::new(" ".repeat(message_area.width as usize))
+                        .style(Style::default().fg(Color::Reset).bg(Color::Reset)),
+                    message_area,
+                );
+            }
+            frame.render_widget(
+                Paragraph::new(Line::styled(message, Style::default().fg(theme.error)))
+                    .style(Style::default().fg(Color::Reset).bg(Color::Reset))
+                    .alignment(Alignment::Center),
+                message_area,
+            );
+        }
+    }
 }
 
 fn draw_projects(frame: &mut ratatui::Frame, area: Rect, app: &App, theme: ResolvedTheme) {
@@ -1817,11 +1972,13 @@ fn draw_help(frame: &mut ratatui::Frame, area: Rect, theme: ResolvedTheme) {
             "Act",
             &[
                 ("Enter", "open or resume"),
-                ("N / n", "new project / chat"),
+                ("N / n", "new chat"),
+                ("P", "new project"),
                 ("/", "search"),
                 ("a", "active / all"),
                 ("A / U", "archive / unarchive"),
                 ("D", "delete or hide"),
+                ("H", "unhide project"),
                 ("r", "refresh"),
                 ("q / Esc", "quit"),
             ],
@@ -1970,6 +2127,58 @@ fn draw_new_project_prompt(
             .block(panel(" New project path ", true, theme))
             .style(Style::default().fg(theme.foreground)),
         popup,
+    );
+}
+
+fn draw_unhide_project_prompt(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    app: &App,
+    theme: ResolvedTheme,
+) {
+    let height = (app.state.hidden_project_paths.len() as u16 + 4).min(20);
+    let popup = centered(area, 86, height);
+    frame.render_widget(Clear, popup);
+    let visible_rows = popup.height.saturating_sub(2) as usize;
+    let start = app
+        .unhide_project_index
+        .saturating_sub(visible_rows.saturating_sub(1));
+    let items: Vec<ListItem> = app
+        .state
+        .hidden_project_paths
+        .iter()
+        .skip(start)
+        .take(visible_rows)
+        .map(|path| {
+            ListItem::new(Line::styled(
+                display_dir_path(path),
+                Style::default().fg(theme.status_project),
+            ))
+        })
+        .collect();
+    let mut state = ListState::default().with_selected(Some(app.unhide_project_index - start));
+    let title = app
+        .delete_notice
+        .as_deref()
+        .unwrap_or("Unhide project (Enter)");
+    let title_style = if app.delete_notice.is_some() {
+        Style::default()
+            .fg(theme.error)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.title_focused)
+    };
+    let block = Block::default()
+        .title(Line::styled(format!(" {title} "), title_style))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border_focused))
+        .style(Style::default().fg(theme.foreground));
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(selected(theme)),
+        popup,
+        &mut state,
     );
 }
 
@@ -2367,6 +2576,22 @@ fn list_index_at(y: u16, area: Rect) -> Option<usize> {
     (y >= inner_top && y < inner_bottom).then_some((y - inner_top) as usize)
 }
 
+fn status_message_area(area: Rect, left_width: u16, right_width: u16, message_width: u16) -> Rect {
+    let center_x = area.x.saturating_add(left_width);
+    let right_x = area.x + area.width.saturating_sub(right_width);
+    let center_width = right_x.saturating_sub(center_x);
+    if center_width >= message_width {
+        Rect {
+            x: center_x,
+            y: area.y,
+            width: center_width,
+            height: area.height,
+        }
+    } else {
+        area
+    }
+}
+
 fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
     let project_count = app.projects.len();
     let thread_count = app
@@ -2374,16 +2599,11 @@ fn status_action_at(app: &App, x: u16, width: u16) -> Option<StatusAction> {
         .iter()
         .map(|project| project.threads.len())
         .sum::<usize>();
-    let count_status = format!("{project_count} projects · {thread_count} threads");
     let mut offset = 0usize;
     offset += 1;
     offset += format!(" {project_count}").chars().count();
     offset += STATUS_GAP.chars().count();
     offset += format!("󰻞 {thread_count}").chars().count();
-    if app.status != count_status {
-        offset += STATUS_GAP.chars().count();
-        offset += app.status.chars().count();
-    }
 
     let mut cursor = offset;
     for (label, action) in status_actions_left(app) {
@@ -2451,8 +2671,9 @@ fn status_actions_right(app: &App) -> Vec<(&'static str, StatusAction)> {
     vec![
         ("󰷏 (enter)", StatusAction::Open),
         ("󰁌 (a)ll", StatusAction::ToggleArchived),
-        (" (N)ew Project", StatusAction::NewProject),
-        (" (n)ew Chat", StatusAction::New),
+        (" (P)roject", StatusAction::NewProject),
+        (" (N)ew Chat", StatusAction::New),
+        (" (H)idden", StatusAction::UnhideProject),
         archive_action,
         (" (D)elete", StatusAction::Delete),
     ]
@@ -2467,6 +2688,7 @@ fn status_color(action: StatusAction, theme: ResolvedTheme) -> Color {
         StatusAction::ToggleArchived => theme.status_archive,
         StatusAction::SetArchived => theme.status_archive_action,
         StatusAction::SetUnarchived => theme.status_unarchive,
+        StatusAction::UnhideProject => theme.status_updated,
         StatusAction::Delete => theme.status_delete,
         StatusAction::Help => theme.status_help,
     }
@@ -2633,6 +2855,19 @@ mod tests {
         assert_eq!(color("#112233"), Color::Rgb(0x11, 0x22, 0x33));
     }
     #[test]
+    fn status_message_uses_center_gap_when_it_fits() {
+        let area = Rect::new(0, 0, 100, 1);
+        assert_eq!(
+            status_message_area(area, 20, 20, 30),
+            Rect::new(20, 0, 60, 1)
+        );
+    }
+    #[test]
+    fn status_message_takes_full_bar_when_crowded() {
+        let area = Rect::new(0, 0, 60, 1);
+        assert_eq!(status_message_area(area, 25, 25, 30), area);
+    }
+    #[test]
     fn formats_thread_dates() {
         assert_eq!(format_timestamp(0), "January 01, 1970");
     }
@@ -2676,6 +2911,18 @@ mod tests {
         );
         assert_eq!(delete_choice_at(18, 9, popup, &project), None);
         assert_eq!(delete_choice_at(13, 8, popup, &project), None);
+    }
+
+    #[test]
+    fn delete_project_removes_directory_from_disk() {
+        let root = env::temp_dir().join(format!("cia-delete-test-{}", std::process::id()));
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("file.txt"), "data").unwrap();
+
+        remove_path_from_disk(&root).unwrap();
+
+        assert!(!root.exists());
     }
 
     #[test]

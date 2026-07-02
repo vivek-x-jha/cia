@@ -257,6 +257,10 @@ impl Client {
         self.run(&["kill-pane", "-t", pane_id])
     }
 
+    pub fn kill_session(&self, session: &str) -> Result<()> {
+        self.run(&["kill-session", "-t", session])
+    }
+
     pub fn switch_to(&self, window: &Window) -> Result<()> {
         if env::var_os("TMUX").is_some() {
             self.run(&["switch-client", "-t", &window.session])?;
@@ -541,6 +545,12 @@ mod tests {
         assert_eq!(new_chat.window_id, window.window_id);
         assert_eq!(new_chat.thread_id, None);
         assert_eq!(new_chat.chat_title.as_deref(), Some("Named chat"));
+        client.kill_session("project").unwrap();
+        let has_session = Command::new(&wrapper)
+            .args(["has-session", "-t", "project"])
+            .status()
+            .unwrap();
+        assert!(!has_session.success());
         let _ = Command::new(&wrapper).arg("kill-server").status();
     }
 }

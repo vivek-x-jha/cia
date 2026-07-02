@@ -20,7 +20,7 @@ struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Preselect the project matching this working directory
+    /// Select this project path, even before it has saved chats
     #[arg(long, value_name = "PATH", global = true)]
     project: Option<PathBuf>,
 }

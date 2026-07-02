@@ -5,7 +5,7 @@
 **A tmux-native dashboard for Codex, Pi, and other coding-agent chats.**
 
 <p>
-  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.5.0-eccef0?style=flat-square"></a>
+  <a href="https://github.com/vivek-x-jha/cia"><img alt="Release" src="https://img.shields.io/badge/release-v1.6.0-eccef0?style=flat-square"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/built_with-Rust-ea6962?style=flat-square&logo=rust"></a>
   <a href="https://ratatui.rs/"><img alt="UI" src="https://img.shields.io/badge/UI-Ratatui-a9b665?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-7daea3?style=flat-square"></a>
@@ -32,6 +32,7 @@ pane mappings and local UI state.
   thread id, archive state, timestamps, and context remaining when available.
 - 🟢 **Live-pane detection** through tmux metadata; switch without duplicating agents.
 - 🚀 **New named chats** for Pi, Claude Code, Codex, Cursor, and OpenCode.
+- 🌱 **Brand-new project bootstrapping** with `cia --project "$PWD"` before chats exist.
 - 🧭 **One `agents` window per project**, each chat in a dedicated pane.
 - ♻️ **tmux-resurrect-friendly wrapper** for restoring managed chats.
 - 🧰 **Launch-only support** for Claude Code, Cursor, and OpenCode.
@@ -77,7 +78,7 @@ Open the dashboard:
 cia
 ```
 
-Start focused on the current project:
+Start focused on the current project, including brand-new directories with no chats yet:
 
 ```sh
 cia --project "$PWD"
@@ -120,12 +121,13 @@ Reload tmux and open with `prefix + g`.
 | `Ctrl+d`, `Ctrl+u` | Scroll focused status/preview pane |
 | `gg`, `G` | Jump to first/last item |
 | `Enter` | Switch to live pane or resume saved thread |
-| `N` | Add/create a project path |
-| `n` | Pick a harness and start a named chat |
+| `N`, `n` | Pick a harness and start a named chat in the selected project |
+| `P` | Add/create a project path |
+| `H` | Unhide a hidden project from the hidden-project picker |
 | `/` | Search projects and chats |
 | `a` | Toggle active/all chats |
 | `A`, `U` | Archive/unarchive selected saved chat in CIA state |
-| `D` | Hide/delete project or delete selected chat history file(s) and matching live pane |
+| `D` | Hide/delete project, or delete selected chat history file(s) and matching live pane. Project delete also kills matching tmux session(s). |
 | `r` | Refresh |
 | `?` | Help |
 | `q`, `Esc` | Quit |
@@ -306,9 +308,9 @@ $XDG_STATE_HOME/cia/state.json
 
 Fallback path: `~/.local/state/cia/state.json`.
 
-This state contains CIA pane mappings, hidden projects, selected project, and
+This state contains CIA pane mappings, hidden/deleted project suppression, selected project, and
 local archive flags. Delete actions are explicit: project delete removes a
-project directory; chat delete removes known chat history file(s) and matching
+project directory and matching tmux session(s) without adding it to the hidden-project list; chat delete removes known chat history file(s) and matching
 live tmux pane. CIA never mutates Codex/Pi history as part of listing or preview.
 
 ## 🧱 Architecture

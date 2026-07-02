@@ -33,6 +33,8 @@ pub struct State {
     pub project_paths: Vec<String>,
     #[serde(default)]
     pub hidden_project_paths: Vec<String>,
+    #[serde(default)]
+    pub deleted_project_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,6 +53,7 @@ impl Default for State {
             archived_threads: Vec::new(),
             project_paths: Vec::new(),
             hidden_project_paths: Vec::new(),
+            deleted_project_paths: Vec::new(),
         }
     }
 }
@@ -119,6 +122,7 @@ impl State {
 
     pub fn add_project_path(&mut self, cwd: String) {
         self.hidden_project_paths.retain(|path| path != &cwd);
+        self.deleted_project_paths.retain(|path| path != &cwd);
         if !self.project_paths.iter().any(|path| path == &cwd) {
             self.project_paths.push(cwd);
         }
@@ -134,8 +138,32 @@ impl State {
         }
     }
 
+    pub fn unhide_project_path(&mut self, cwd: &str) {
+        self.hidden_project_paths.retain(|path| path != cwd);
+        self.add_project_path(cwd.to_owned());
+    }
+
+    pub fn delete_project_path(&mut self, cwd: &str) {
+        self.project_paths.retain(|path| path != cwd);
+        self.hidden_project_paths.retain(|path| path != cwd);
+        if !self.deleted_project_paths.iter().any(|path| path == cwd) {
+            self.deleted_project_paths.push(cwd.to_owned());
+        }
+        if self.last_project.as_deref() == Some(cwd) {
+            self.last_project = None;
+        }
+    }
+
     pub fn is_project_hidden(&self, cwd: &str) -> bool {
         self.hidden_project_paths.iter().any(|path| path == cwd)
+    }
+
+    pub fn is_project_deleted(&self, cwd: &str) -> bool {
+        self.deleted_project_paths.iter().any(|path| path == cwd)
+    }
+
+    pub fn is_project_suppressed(&self, cwd: &str) -> bool {
+        self.is_project_hidden(cwd) || self.is_project_deleted(cwd)
     }
 
     pub fn record(&mut self, harness_id: &str, thread_id: &str, window: &Window) {
@@ -200,5 +228,25 @@ mod tests {
         state.reconcile(&mut windows);
         assert_eq!(windows[0].harness_id.as_deref(), Some(DEFAULT_HARNESS_ID));
         assert_eq!(windows[0].thread_id.as_deref(), Some("thread"));
+    }
+
+    #[test]
+    fn unhide_moves_project_back_to_visible_paths() {
+        let mut state = State::default();
+        state.hide_project_path("/repo");
+        state.unhide_project_path("/repo");
+        assert_eq!(state.hidden_project_paths, Vec::<String>::new());
+        assert_eq!(state.project_paths, vec!["/repo".to_owned()]);
+    }
+
+    #[test]
+    fn delete_suppresses_without_adding_to_hidden_list() {
+        let mut state = State::default();
+        state.add_project_path("/repo".into());
+        state.delete_project_path("/repo");
+        assert_eq!(state.project_paths, Vec::<String>::new());
+        assert_eq!(state.hidden_project_paths, Vec::<String>::new());
+        assert_eq!(state.deleted_project_paths, vec!["/repo".to_owned()]);
+        assert!(state.is_project_suppressed("/repo"));
     }
 }
