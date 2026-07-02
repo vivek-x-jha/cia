@@ -291,11 +291,6 @@ fn run_thread(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to run {agent_command} through zsh"))?;
-    if kind == agent::HarnessKind::Codex && resume_id.is_none() {
-        if let Some(pane_id) = &pane_id {
-            tmux.rename_active_agent_thread(pane_id, title)?;
-        }
-    }
     let status = child.wait()?;
     if !status.success() {
         bail!("{agent_command} exited with {status}");

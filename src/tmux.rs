@@ -4,8 +4,6 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
-    thread,
-    time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -241,16 +239,6 @@ impl Client {
         ])?;
         self.run(&["set-option", "-p", "-t", pane_id, "@cia_chat_title", title])?;
         self.run(&["select-pane", "-t", pane_id, "-T", title])
-    }
-
-    pub fn rename_active_agent_thread(&self, pane_id: &str, title: &str) -> Result<()> {
-        thread::sleep(Duration::from_millis(1_000));
-        self.run(&["send-keys", "-t", pane_id, "-l", "/rename"])?;
-        self.run(&["send-keys", "-t", pane_id, "Enter"])?;
-        thread::sleep(Duration::from_millis(250));
-        self.run(&["send-keys", "-t", pane_id, "-l", title])?;
-        thread::sleep(Duration::from_millis(150));
-        self.run(&["send-keys", "-t", pane_id, "Enter"])
     }
 
     pub fn kill_pane(&self, pane_id: &str) -> Result<()> {
